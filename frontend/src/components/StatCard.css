@@ -1,0 +1,54 @@
+.stat-card {
+  background: white;
+  padding: 25px;
+  border-radius: 15px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  transition: transform 0.3s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-5px);
+}
+
+.stat-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 15px;
+}
+
+.stat-card-title {
+  color: #666;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-card-icon {
+  opacity: 0.6;
+}
+
+.stat-card.total .stat-card-icon { color: #667eea; }
+.stat-card.completed .stat-card-icon { color: #48bb78; }
+.stat-card.pending .stat-card-icon { color: #ed8936; }
+.stat-card.failed .stat-card-icon { color: #f56565; }
+
+.stat-value {
+  font-size: 36px;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.stat-value.total { color: #667eea; }
+.stat-value.completed { color: #48bb78; }
+.stat-value.pending { color: #ed8936; }
+.stat-value.failed { color: #f56565; }
+
+.stat-subtext {
+  font-size: 13px;
+  color: #999;
+  font-weight: 500;
+}
+
+
