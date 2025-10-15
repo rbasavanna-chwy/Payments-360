@@ -8,9 +8,6 @@ function DateFilter({ dateFilter, setDateFilter, customDateRange, setCustomDateR
   const [tempDateRange, setTempDateRange] = useState({ startDate: '', endDate: '' });
 
   const dateOptions = [
-    { value: 'last_15_min', label: 'Last 15 minutes' },
-    { value: 'last_60_min', label: 'Last 60 minutes' },
-    { value: 'last_4_hours', label: 'Last 4 hours' },
     { value: 'last_24_hours', label: 'Last 24 hours' },
     { value: 'last_7_days', label: 'Last 7 days' },
     { value: 'last_28_days', label: 'Last 28 days' },
@@ -68,7 +65,6 @@ function DateFilter({ dateFilter, setDateFilter, customDateRange, setCustomDateR
           value={dateFilter}
           onChange={handleDateFilterChange}
         >
-          <option value="">All Time</option>
           {dateOptions.map(option => (
             <option key={option.value} value={option.value}>
               {option.label}

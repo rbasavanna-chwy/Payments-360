@@ -53,6 +53,32 @@ export const generateSampleData = async () => {
   return response.data;
 };
 
+// Filter endpoints
+export const fetchPaymentStatuses = async () => {
+  const response = await api.get('/payments/filters/payment-statuses');
+  return response.data;
+};
+
+export const fetchPaymentMethods = async () => {
+  const response = await api.get('/payments/filters/payment-methods');
+  return response.data;
+};
+
+export const fetchOrderTypes = async () => {
+  const response = await api.get('/payments/filters/order-types');
+  return response.data;
+};
+
+export const fetchAgedMetrics = async (orderType, paymentMethod, paymentState, dateFilter, frequency = 'daily') => {
+  const params = {};
+  if (orderType && orderType !== 'all') params.orderType = orderType;
+  if (paymentMethod && paymentMethod !== 'all') params.paymentMethod = paymentMethod;
+  if (paymentState && paymentState !== 'all') params.paymentState = paymentState;
+  if (dateFilter && dateFilter !== 'all') params.dateFilter = dateFilter;
+  if (frequency) params.frequency = frequency;
+  
+  const response = await api.get('/payments/aged-metrics', { params });
+  return response.data;
+};
+
 export default api;
-
-

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
+import OverviewChart from './components/OverviewChart';
 import AgedMetricsTabs from './components/AgedMetricsTabs';
 import TransactionDetails from './components/TransactionDetails';
 import { fetchPayments, fetchStatistics, generateSampleData } from './services/api';
@@ -8,7 +9,7 @@ import './App.css';
 
 function App() {
   const [activeView, setActiveView] = useState('home');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [payments, setPayments] = useState([]);
   const [filteredPayments, setFilteredPayments] = useState([]);
   const [statistics, setStatistics] = useState(null);
@@ -157,6 +158,7 @@ function App() {
         />
         {activeView === 'home' && (
           <>
+            <OverviewChart />
             <AgedMetricsTabs />
           </>
         )}

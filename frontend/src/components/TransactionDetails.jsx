@@ -3,14 +3,44 @@ import { X, Download, Filter, Search, ChevronLeft, ChevronRight } from 'lucide-r
 import DateFilter from './DateFilter';
 import './TransactionDetails.css';
 
-function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, allPaymentMethods, allPaymentStates, isFullPage = false, defaultDateFilter = '' }) {
+function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, allPaymentMethods, allPaymentStates, isFullPage = false, defaultDateFilter = '', defaultOrderType = '', defaultPaymentMethod = '', defaultPaymentState = '' }) {
+  // Helper functions for formatting (defined early for state initialization)
+  const formatPaymentMethod = (method) => {
+    if (!method) return method;
+    // Remove underscores and spaces, convert to lowercase for lookup
+    const normalizedMethod = method.toLowerCase().replace(/[\s_]/g, '');
+    const methodMap = {
+      creditcard: 'Credit Card',
+      debitcard: 'Debit Card',
+      paypal: 'PayPal',
+      applepay: 'Apple Pay',
+      googlepay: 'Google Pay',
+      giftcard: 'Gift Card',
+      accountbalance: 'Account Balance'
+    };
+    return methodMap[normalizedMethod] || method;
+  };
+
+  const formatPaymentState = (state) => {
+    if (!state) return state;
+    // Handle underscore format (e.g., "IN_PROGRESS" -> "In Progress")
+    if (state.includes('_')) {
+      return state.split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+    }
+    // Handle single word or already formatted
+    return state.charAt(0).toUpperCase() + state.slice(1);
+  };
+
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [orderTypeFilter, setOrderTypeFilter] = useState('');
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState('');
-  const [paymentStateFilter, setPaymentStateFilter] = useState('');
+  const [orderTypeFilter, setOrderTypeFilter] = useState(defaultOrderType);
+  // Format default values to match the transaction format
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState(defaultPaymentMethod ? formatPaymentMethod(defaultPaymentMethod) : '');
+  const [paymentStateFilter, setPaymentStateFilter] = useState(defaultPaymentState ? formatPaymentState(defaultPaymentState) : '');
   const [dateFilter, setDateFilter] = useState(defaultDateFilter);
   const [customDateRange, setCustomDateRange] = useState({ startDate: '', endDate: '' });
   const [showItemsPopup, setShowItemsPopup] = useState(false);
@@ -112,11 +142,13 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
         t.orderType?.toLowerCase().includes(search) ||
         t.paymentMethod?.toLowerCase().includes(search) ||
         t.paymentState?.toLowerCase().includes(search) ||
+        t.transactionId?.toLowerCase().includes(search) ||
+        t.errorMessage?.toLowerCase().includes(search) ||
         (t.items && t.items.some(item => item.name?.toLowerCase().includes(search)))
       );
     }
 
-    // Apply dropdown filters
+    // Apply dropdown filters - direct comparison since both sides are formatted consistently
     if (orderTypeFilter) {
       filtered = filtered.filter(t => t.orderType === orderTypeFilter);
     }
@@ -174,8 +206,14 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
 
   // Use provided filter values or fall back to current transaction values
   const uniqueOrderTypes = allOrderTypes || [...new Set(transactions.map(t => t.orderType).filter(Boolean))];
-  const uniquePaymentMethods = allPaymentMethods || [...new Set(transactions.map(t => t.paymentMethod).filter(Boolean))];
-  const uniquePaymentStates = allPaymentStates || [...new Set(transactions.map(t => t.paymentState).filter(Boolean))];
+  // Format the payment methods from allPaymentMethods if provided, otherwise use transaction values
+  const uniquePaymentMethods = allPaymentMethods 
+    ? [...new Set(allPaymentMethods.map(m => formatPaymentMethod(m)))]
+    : [...new Set(transactions.map(t => t.paymentMethod).filter(Boolean))];
+  // Format the payment states if provided, otherwise use transaction values
+  const uniquePaymentStates = allPaymentStates
+    ? [...new Set(allPaymentStates.map(s => formatPaymentState(s)))]
+    : [...new Set(transactions.map(t => t.paymentState).filter(Boolean))];
 
   const handleClearFilters = () => {
     setOrderTypeFilter('');
@@ -199,16 +237,18 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
   };
 
   const handleExport = () => {
-    const headers = ['Customer ID', 'Order ID', 'Items', 'Item Count', 'Order Type', 'Payment Method', 'Amount', 'Status', 'Time Requested', 'Last Updated'];
+    const headers = ['Customer ID', 'Order ID', 'Items', 'Order Type', 'Payment Method', 'Requested Amount', 'Payment State', 'Approved Amount', 'Reference Id', 'Reason', 'Time Requested', 'Last Updated'];
     const rows = sortedTransactions.map(t => [
       t.customerId || 'N/A',
       t.orderId || 'N/A',
-      t.items && t.items.length > 0 ? `"${t.items.map(item => `${item.itemId}: ${item.name} ($${item.price})`).join('; ')}"` : '0 items',
       t.itemCount || (t.items ? t.items.length : 0),
       t.orderType ? (t.orderType.charAt(0).toUpperCase() + t.orderType.slice(1)) : 'N/A',
       t.paymentMethod,
       t.amount.toFixed(2),
       t.paymentState,
+      t.amount.toFixed(2),
+      t.transactionId || 'N/A',
+      t.errorMessage || '-',
       new Date(t.date).toLocaleString(),
       t.lastUpdated ? new Date(t.lastUpdated).toLocaleString() : 'N/A'
     ]);
@@ -234,17 +274,6 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
     return statusMap[status?.toLowerCase()] || 'status-default';
   };
 
-  const formatPaymentMethod = (method) => {
-    const methodMap = {
-      creditcard: 'Credit Card',
-      paypal: 'PayPal',
-      applepay: 'Apple Pay',
-      giftcard: 'Gift Card',
-      accountbalance: 'Account Balance'
-    };
-    return methodMap[method?.toLowerCase()] || method;
-  };
-
   return (
     <div className={isFullPage ? "transaction-details-fullpage" : "transaction-details-overlay"} onClick={isFullPage ? undefined : onClose}>
       <div className={isFullPage ? "transaction-details-container" : "transaction-details-modal"} onClick={(e) => e.stopPropagation()}>
@@ -264,7 +293,7 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
             <Search size={18} />
             <input
               type="text"
-              placeholder="Search by Order ID, Customer ID, Items, Order Type, Payment Method, or Status..."
+              placeholder="Search by Order ID, Customer ID, Order Type, Payment Method, Payment State, Reference Id, or Reason..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -315,14 +344,14 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                 <option value="">All</option>
                 {uniquePaymentMethods.map(method => (
                   <option key={method} value={method}>
-                    {formatPaymentMethod(method)}
+                    {method}
                   </option>
                 ))}
               </select>
             </div>
 
             <div className="filter-item">
-              <label>Status</label>
+              <label>Payment State</label>
               <select 
                 value={paymentStateFilter} 
                 onChange={(e) => setPaymentStateFilter(e.target.value)}
@@ -331,7 +360,7 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                 <option value="">All</option>
                 {uniquePaymentStates.map(state => (
                   <option key={state} value={state}>
-                    {state.charAt(0).toUpperCase() + state.slice(1)}
+                    {state}
                   </option>
                 ))}
               </select>
@@ -376,14 +405,32 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                     )}
                   </th>
                   <th onClick={() => handleSort('amount')} className="sortable">
-                    Amount
+                    Requested Amount
                     {sortConfig.key === 'amount' && (
                       <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </th>
                   <th onClick={() => handleSort('paymentState')} className="sortable">
-                    Status
+                    Payment State
                     {sortConfig.key === 'paymentState' && (
+                      <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleSort('amount')} className="sortable">
+                    Approved Amount
+                    {sortConfig.key === 'amount' && (
+                      <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleSort('transactionId')} className="sortable">
+                    Reference Id
+                    {sortConfig.key === 'transactionId' && (
+                      <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleSort('errorMessage')} className="sortable">
+                    Reason
+                    {sortConfig.key === 'errorMessage' && (
                       <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </th>
@@ -418,10 +465,10 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                             onClick={() => handleItemsClick(transaction.items)}
                             title="Click to view item details"
                           >
-                            {transaction.itemCount || transaction.items.length} {transaction.items.length === 1 ? 'item' : 'items'}
+                            {transaction.itemCount || transaction.items.length}
                           </span>
                         ) : (
-                          <span className="items-count">0 items</span>
+                          <span className="items-count">0</span>
                         )}
                       </td>
                       <td>
@@ -441,6 +488,15 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                         </span>
                       </td>
                       <td>
+                        <span className="amount">${transaction.amount.toFixed(2)}</span>
+                      </td>
+                      <td>
+                        <span className="transaction-id">{transaction.transactionId || 'N/A'}</span>
+                      </td>
+                      <td>
+                        <span className="reason">{transaction.errorMessage || '-'}</span>
+                      </td>
+                      <td>
                         <span className="timestamp">{new Date(transaction.date).toLocaleString()}</span>
                       </td>
                       <td>
@@ -452,7 +508,7 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="9" className="no-data">
+                    <td colSpan="12" className="no-data">
                       No transactions found
                     </td>
                   </tr>

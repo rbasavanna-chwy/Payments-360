@@ -3,7 +3,7 @@ import { Home, FileText, DollarSign, RefreshCw, RotateCcw, Bell, Settings, Chevr
 import './Sidebar.css';
 
 function Sidebar({ activeView, setActiveView, onCollapse }) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   
   const toggleCollapse = () => {
     const newState = !isCollapsed;

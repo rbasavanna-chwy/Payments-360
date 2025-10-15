@@ -45,6 +45,9 @@ public class Payment {
     @Column(nullable = false)
     private PaymentMethod paymentMethod;
     
+    @Column
+    private String orderType;
+    
     @Column(nullable = false)
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;

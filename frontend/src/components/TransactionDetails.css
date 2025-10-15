@@ -39,7 +39,7 @@
   border-radius: 12px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   width: 100%;
-  max-width: 1400px;
+  max-width: 95vw;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -313,7 +313,8 @@
 .transactions-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: 13px;
+  min-width: 1600px;
 }
 
 .transactions-table thead {
@@ -324,12 +325,13 @@
 }
 
 .transactions-table th {
-  padding: 16px 20px;
+  padding: 12px 14px;
   text-align: left;
   font-weight: 600;
   color: #4a5568;
   border-bottom: 2px solid #e2e8f0;
   white-space: nowrap;
+  font-size: 12px;
 }
 
 .transactions-table th.sortable {
@@ -358,15 +360,27 @@
 }
 
 .transactions-table td {
-  padding: 16px 20px;
+  padding: 12px 14px;
   color: #2d3748;
+  font-size: 13px;
+  vertical-align: middle;
 }
 
 .customer-id,
-.order-id {
+.order-id,
+.transaction-id {
   font-family: monospace;
-  font-size: 13px;
+  font-size: 12px;
   color: #4a5568;
+}
+
+.reason {
+  color: #4a5568;
+  font-size: 12px;
+  max-width: 200px;
+  word-wrap: break-word;
+  white-space: normal;
+  line-height: 1.4;
 }
 
 .items-count {
@@ -426,7 +440,8 @@
 .amount {
   font-weight: 600;
   color: #2d3748;
-  font-size: 15px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .status-badge {
@@ -474,7 +489,8 @@
 
 .timestamp {
   color: #718096;
-  font-size: 13px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .no-data {
