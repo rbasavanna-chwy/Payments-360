@@ -314,7 +314,8 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
-  min-width: 1600px;
+  min-width: 1200px;
+  table-layout: auto;
 }
 
 .transactions-table thead {
@@ -332,6 +333,52 @@
   border-bottom: 2px solid #e2e8f0;
   white-space: nowrap;
   font-size: 12px;
+}
+
+/* Column width optimization */
+.transactions-table th:nth-child(1),
+.transactions-table td:nth-child(1) {
+  width: 10%;
+  min-width: 100px;
+}
+
+.transactions-table th:nth-child(2),
+.transactions-table td:nth-child(2) {
+  width: 10%;
+  min-width: 90px;
+}
+
+.transactions-table th:nth-child(3),
+.transactions-table td:nth-child(3) {
+  width: 12%;
+  min-width: 110px;
+}
+
+.transactions-table th:nth-child(4),
+.transactions-table td:nth-child(4) {
+  width: 12%;
+  min-width: 120px;
+}
+
+.transactions-table th:nth-child(5),
+.transactions-table td:nth-child(5) {
+  width: 12%;
+  min-width: 100px;
+}
+
+.transactions-table th:nth-child(6),
+.transactions-table td:nth-child(6) {
+  width: 12%;
+  min-width: 120px;
+}
+
+.transactions-table th:nth-child(7),
+.transactions-table td:nth-child(7) {
+  width: 32%;
+  min-width: 150px;
+  max-width: 300px;
+  white-space: normal;
+  word-wrap: break-word;
 }
 
 .transactions-table th.sortable {
@@ -374,13 +421,32 @@
   color: #4a5568;
 }
 
+.clickable-order-id {
+  color: #667eea;
+  cursor: pointer;
+  text-decoration: none;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.clickable-order-id:hover {
+  color: #5568d3;
+  background: #eef2ff;
+  text-decoration: underline;
+  transform: translateY(-1px);
+}
+
 .reason {
   color: #4a5568;
   font-size: 12px;
-  max-width: 200px;
+  display: block;
   word-wrap: break-word;
   white-space: normal;
   line-height: 1.4;
+  overflow-wrap: break-word;
 }
 
 .items-count {
@@ -480,6 +546,21 @@
 .status-declined {
   background: #fde68a;
   color: #78350f;
+}
+
+.status-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-partial {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-refunded {
+  background: #dbeafe;
+  color: #1e40af;
 }
 
 .status-default {

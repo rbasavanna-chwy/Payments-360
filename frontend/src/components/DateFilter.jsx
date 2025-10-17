@@ -3,9 +3,14 @@ import ReactDOM from 'react-dom';
 import { Calendar, X } from 'lucide-react';
 import './DateFilter.css';
 
-function DateFilter({ dateFilter, setDateFilter, customDateRange, setCustomDateRange }) {
+function DateFilter({ dateFilter, setDateFilter, customDateRange, setCustomDateRange, idPrefix = 'default' }) {
   const [showCustomPopup, setShowCustomPopup] = useState(false);
   const [tempDateRange, setTempDateRange] = useState({ startDate: '', endDate: '' });
+  
+  // Generate unique IDs using the prefix
+  const dateFilterId = `${idPrefix}-dateFilter`;
+  const popupStartDateId = `${idPrefix}-popupStartDate`;
+  const popupEndDateId = `${idPrefix}-popupEndDate`;
 
   const dateOptions = [
     { value: 'last_24_hours', label: 'Last 24 hours' },
@@ -55,12 +60,12 @@ function DateFilter({ dateFilter, setDateFilter, customDateRange, setCustomDateR
   return (
     <>
       <div className="date-filter-container">
-        <label htmlFor="dateFilter" className="date-filter-label">
+        <label htmlFor={dateFilterId} className="date-filter-label">
           <Calendar size={16} />
           Date Period
         </label>
         <select
-          id="dateFilter"
+          id={dateFilterId}
           className="date-filter-select"
           value={dateFilter}
           onChange={handleDateFilterChange}
@@ -110,9 +115,9 @@ function DateFilter({ dateFilter, setDateFilter, customDateRange, setCustomDateR
             
             <div className="custom-date-popup-content">
               <div className="date-input-group">
-                <label htmlFor="popupStartDate">From Date & Time:</label>
+                <label htmlFor={popupStartDateId}>From Date & Time:</label>
                 <input
-                  id="popupStartDate"
+                  id={popupStartDateId}
                   type="datetime-local"
                   className="date-input"
                   value={tempDateRange.startDate}
@@ -121,9 +126,9 @@ function DateFilter({ dateFilter, setDateFilter, customDateRange, setCustomDateR
               </div>
               
               <div className="date-input-group">
-                <label htmlFor="popupEndDate">To Date & Time:</label>
+                <label htmlFor={popupEndDateId}>To Date & Time:</label>
                 <input
-                  id="popupEndDate"
+                  id={popupEndDateId}
                   type="datetime-local"
                   className="date-input"
                   value={tempDateRange.endDate}

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { X, Download, Filter, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import DateFilter from './DateFilter';
+import OrderDetailsView from './OrderDetailsView';
 import './TransactionDetails.css';
 
-function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, allPaymentMethods, allPaymentStates, isFullPage = false, defaultDateFilter = '', defaultOrderType = '', defaultPaymentMethod = '', defaultPaymentState = '' }) {
+function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, allPaymentMethods, allPaymentStates, isFullPage = false, defaultDateFilter = '', defaultOrderType = '', defaultPaymentMethod = '', defaultPaymentState = '', activeTab = 'approvals' }) {
   // Helper functions for formatting (defined early for state initialization)
   const formatPaymentMethod = (method) => {
     if (!method) return method;
@@ -33,6 +34,18 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
     return state.charAt(0).toUpperCase() + state.slice(1);
   };
 
+  const formatOrderType = (orderType) => {
+    if (!orderType) return orderType;
+    // Handle underscore format
+    if (orderType.includes('_')) {
+      return orderType.split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+    }
+    // Handle single word
+    return orderType.charAt(0).toUpperCase() + orderType.slice(1);
+  };
+
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
   const [currentPage, setCurrentPage] = useState(1);
@@ -43,8 +56,7 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
   const [paymentStateFilter, setPaymentStateFilter] = useState(defaultPaymentState ? formatPaymentState(defaultPaymentState) : '');
   const [dateFilter, setDateFilter] = useState(defaultDateFilter);
   const [customDateRange, setCustomDateRange] = useState({ startDate: '', endDate: '' });
-  const [showItemsPopup, setShowItemsPopup] = useState(false);
-  const [selectedItems, setSelectedItems] = useState([]);
+  const [selectedOrder, setSelectedOrder] = useState(null);
 
   const handleSort = (key) => {
     setSortConfig(prev => ({
@@ -137,26 +149,32 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
       const search = searchTerm.toLowerCase();
       filtered = filtered.filter(t => 
         t.orderId?.toLowerCase().includes(search) ||
-        t.customerId?.toLowerCase().includes(search) ||
         t.customerName?.toLowerCase().includes(search) ||
         t.orderType?.toLowerCase().includes(search) ||
         t.paymentMethod?.toLowerCase().includes(search) ||
         t.paymentState?.toLowerCase().includes(search) ||
-        t.transactionId?.toLowerCase().includes(search) ||
-        t.errorMessage?.toLowerCase().includes(search) ||
-        (t.items && t.items.some(item => item.name?.toLowerCase().includes(search)))
+        t.errorMessage?.toLowerCase().includes(search)
       );
     }
 
-    // Apply dropdown filters - direct comparison since both sides are formatted consistently
+    // Apply dropdown filters - format transaction values to match filter values
     if (orderTypeFilter) {
-      filtered = filtered.filter(t => t.orderType === orderTypeFilter);
+      filtered = filtered.filter(t => {
+        const formattedOrderType = formatOrderType(t.orderType);
+        return formattedOrderType === orderTypeFilter;
+      });
     }
     if (paymentMethodFilter) {
-      filtered = filtered.filter(t => t.paymentMethod === paymentMethodFilter);
+      filtered = filtered.filter(t => {
+        const formattedPaymentMethod = formatPaymentMethod(t.paymentMethod);
+        return formattedPaymentMethod === paymentMethodFilter;
+      });
     }
     if (paymentStateFilter) {
-      filtered = filtered.filter(t => t.paymentState === paymentStateFilter);
+      filtered = filtered.filter(t => {
+        const formattedPaymentState = formatPaymentState(t.paymentState);
+        return formattedPaymentState === paymentStateFilter;
+      });
     }
 
     // Apply sorting
@@ -205,15 +223,18 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
   }, [searchTerm, sortConfig, orderTypeFilter, paymentMethodFilter, paymentStateFilter, dateFilter, customDateRange]);
 
   // Use provided filter values or fall back to current transaction values
-  const uniqueOrderTypes = allOrderTypes || [...new Set(transactions.map(t => t.orderType).filter(Boolean))];
+  // Format the order types from allOrderTypes if provided, otherwise use transaction values
+  const uniqueOrderTypes = allOrderTypes 
+    ? [...new Set(allOrderTypes.map(t => formatOrderType(t)))]
+    : [...new Set(transactions.map(t => t.orderType).filter(Boolean).map(t => formatOrderType(t)))];
   // Format the payment methods from allPaymentMethods if provided, otherwise use transaction values
   const uniquePaymentMethods = allPaymentMethods 
     ? [...new Set(allPaymentMethods.map(m => formatPaymentMethod(m)))]
-    : [...new Set(transactions.map(t => t.paymentMethod).filter(Boolean))];
+    : [...new Set(transactions.map(t => t.paymentMethod).filter(Boolean).map(m => formatPaymentMethod(m)))];
   // Format the payment states if provided, otherwise use transaction values
   const uniquePaymentStates = allPaymentStates
     ? [...new Set(allPaymentStates.map(s => formatPaymentState(s)))]
-    : [...new Set(transactions.map(t => t.paymentState).filter(Boolean))];
+    : [...new Set(transactions.map(t => t.paymentState).filter(Boolean).map(s => formatPaymentState(s)))];
 
   const handleClearFilters = () => {
     setOrderTypeFilter('');
@@ -226,31 +247,17 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
 
   const activeFiltersCount = [orderTypeFilter, paymentMethodFilter, paymentStateFilter, dateFilter].filter(Boolean).length;
 
-  const handleItemsClick = (items) => {
-    setSelectedItems(items);
-    setShowItemsPopup(true);
-  };
-
-  const handleCloseItemsPopup = () => {
-    setShowItemsPopup(false);
-    setSelectedItems([]);
-  };
-
   const handleExport = () => {
-    const headers = ['Customer ID', 'Order ID', 'Items', 'Order Type', 'Payment Method', 'Requested Amount', 'Payment State', 'Approved Amount', 'Reference Id', 'Reason', 'Time Requested', 'Last Updated'];
+    const columnHeaders = getColumnHeaders();
+    const headers = ['Order ID', 'Order Type', 'Payment Method', columnHeaders.amount1, 'Payment State', columnHeaders.amount2, 'Reason'];
     const rows = sortedTransactions.map(t => [
-      t.customerId || 'N/A',
       t.orderId || 'N/A',
-      t.itemCount || (t.items ? t.items.length : 0),
       t.orderType ? (t.orderType.charAt(0).toUpperCase() + t.orderType.slice(1)) : 'N/A',
       t.paymentMethod,
       t.amount.toFixed(2),
       t.paymentState,
-      t.amount.toFixed(2),
-      t.transactionId || 'N/A',
-      t.errorMessage || '-',
-      new Date(t.date).toLocaleString(),
-      t.lastUpdated ? new Date(t.lastUpdated).toLocaleString() : 'N/A'
+      t.paymentState?.toLowerCase() === 'success' ? t.amount.toFixed(2) : '0.00',
+      t.errorMessage || '-'
     ]);
 
     const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
@@ -264,14 +271,77 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
 
   const getStatusClass = (status) => {
     const statusMap = {
+      // Original statuses
       success: 'status-success',
       processing: 'status-processing',
       failed: 'status-failed',
       canceled: 'status-canceled',
+      cancelled: 'status-canceled',
       expired: 'status-expired',
-      declined: 'status-declined'
+      declined: 'status-declined',
+      pending: 'status-pending',
+      // New Final Status values
+      approved: 'status-success',
+      'partially approved': 'status-partial',
+      partially_approved: 'status-partial',
+      deposited: 'status-success',
+      'partially deposited': 'status-partial',
+      partially_deposited: 'status-partial',
+      'approval pending': 'status-pending',
+      approval_pending: 'status-pending',
+      'deposit pending': 'status-pending',
+      deposit_pending: 'status-pending',
+      refunded: 'status-refunded',
+      'partially refunded': 'status-partial',
+      partially_refunded: 'status-partial'
     };
-    return statusMap[status?.toLowerCase()] || 'status-default';
+    return statusMap[status?.toLowerCase().replace(/_/g, ' ')] || statusMap[status?.toLowerCase()] || 'status-default';
+  };
+
+  const handleOrderIdClick = (transaction) => {
+    setSelectedOrder(transaction);
+  };
+
+  const handleCloseOrderDetails = () => {
+    setSelectedOrder(null);
+  };
+
+  // Get header title based on active tab
+  const getHeaderTitle = () => {
+    const titles = {
+      'approvals': 'Approval Order Details',
+      'deposit': 'Deposit Order Details',
+      'refunds': 'Refund Order Details',
+      'reverseApproval': 'Reverse Approval Order Details'
+    };
+    return titles[activeTab] || 'Approval Order Details';
+  };
+
+  // Get column headers based on active tab
+  const getColumnHeaders = () => {
+    switch (activeTab) {
+      case 'deposit':
+        return {
+          amount1: 'Depositing Amount',
+          amount2: 'Deposited Amount'
+        };
+      case 'refunds':
+        return {
+          amount1: 'Refund Amount',
+          amount2: 'Refunded Amount'
+        };
+      case 'reverseApproval':
+        return {
+          amount1: 'Reversing Approval Amount',
+          amount2: 'Reversing Approved Amount'
+        };
+      case 'approvals':
+      default:
+        return {
+          amount1: 'Approval amount',
+          amount2: 'Approved Amount'
+        };
+    }
   };
 
   return (
@@ -279,7 +349,7 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
       <div className={isFullPage ? "transaction-details-container" : "transaction-details-modal"} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title-section">
-            <h2>Approval Order Details</h2>
+            <h2>{getHeaderTitle()}</h2>
             <span className="age-group-badge">{ageGroup}</span>
             <span className="transaction-count">{sortedTransactions.length} transactions</span>
           </div>
@@ -293,7 +363,7 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
             <Search size={18} />
             <input
               type="text"
-              placeholder="Search by Order ID, Customer ID, Order Type, Payment Method, Payment State, Reference Id, or Reason..."
+              placeholder="Search by Order ID, Order Type, Payment Method, Payment State, or Reason..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -315,6 +385,7 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                 setDateFilter={setDateFilter}
                 customDateRange={customDateRange}
                 setCustomDateRange={setCustomDateRange}
+                idPrefix="transaction-details"
               />
             </div>
             
@@ -328,7 +399,7 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                 <option value="">All</option>
                 {uniqueOrderTypes.map(type => (
                   <option key={type} value={type}>
-                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                    {type}
                   </option>
                 ))}
               </select>
@@ -379,19 +450,12 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
             <table className="transactions-table">
               <thead>
                 <tr>
-                  <th onClick={() => handleSort('customerId')} className="sortable">
-                    Customer ID
-                    {sortConfig.key === 'customerId' && (
-                      <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
-                    )}
-                  </th>
                   <th onClick={() => handleSort('orderId')} className="sortable">
                     Order ID
                     {sortConfig.key === 'orderId' && (
                       <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </th>
-                  <th>Items</th>
                   <th onClick={() => handleSort('orderType')} className="sortable">
                     Order Type
                     {sortConfig.key === 'orderType' && (
@@ -405,7 +469,7 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                     )}
                   </th>
                   <th onClick={() => handleSort('amount')} className="sortable">
-                    Requested Amount
+                    {getColumnHeaders().amount1}
                     {sortConfig.key === 'amount' && (
                       <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
                     )}
@@ -417,32 +481,14 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                     )}
                   </th>
                   <th onClick={() => handleSort('amount')} className="sortable">
-                    Approved Amount
+                    {getColumnHeaders().amount2}
                     {sortConfig.key === 'amount' && (
-                      <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
-                    )}
-                  </th>
-                  <th onClick={() => handleSort('transactionId')} className="sortable">
-                    Reference Id
-                    {sortConfig.key === 'transactionId' && (
                       <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </th>
                   <th onClick={() => handleSort('errorMessage')} className="sortable">
                     Reason
                     {sortConfig.key === 'errorMessage' && (
-                      <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
-                    )}
-                  </th>
-                  <th onClick={() => handleSort('date')} className="sortable">
-                    Time Requested
-                    {sortConfig.key === 'date' && (
-                      <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
-                    )}
-                  </th>
-                  <th onClick={() => handleSort('lastUpdated')} className="sortable">
-                    Last Updated
-                    {sortConfig.key === 'lastUpdated' && (
                       <span className="sort-indicator">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </th>
@@ -453,23 +499,13 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                   paginatedTransactions.map((transaction, index) => (
                     <tr key={index}>
                       <td>
-                        <span className="customer-id">{transaction.customerId || 'N/A'}</span>
-                      </td>
-                      <td>
-                        <span className="order-id">{transaction.orderId || 'N/A'}</span>
-                      </td>
-                      <td>
-                        {transaction.items && transaction.items.length > 0 ? (
-                          <span 
-                            className="items-count clickable" 
-                            onClick={() => handleItemsClick(transaction.items)}
-                            title="Click to view item details"
-                          >
-                            {transaction.itemCount || transaction.items.length}
-                          </span>
-                        ) : (
-                          <span className="items-count">0</span>
-                        )}
+                        <span 
+                          className="order-id clickable-order-id" 
+                          onClick={() => handleOrderIdClick(transaction)}
+                          title="Click to view order details"
+                        >
+                          {transaction.orderId || 'N/A'}
+                        </span>
                       </td>
                       <td>
                         <span className={`order-type-badge ${transaction.orderType === 'autoship' ? 'autoship' : 'regular'}`}>
@@ -488,27 +524,20 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
                         </span>
                       </td>
                       <td>
-                        <span className="amount">${transaction.amount.toFixed(2)}</span>
+                        <span className="amount">
+                          ${transaction.paymentState?.toLowerCase() === 'success' ? transaction.amount.toFixed(2) : '0.00'}
+                        </span>
                       </td>
                       <td>
-                        <span className="transaction-id">{transaction.transactionId || 'N/A'}</span>
-                      </td>
-                      <td>
-                        <span className="reason">{transaction.errorMessage || '-'}</span>
-                      </td>
-                      <td>
-                        <span className="timestamp">{new Date(transaction.date).toLocaleString()}</span>
-                      </td>
-                      <td>
-                        <span className="timestamp">
-                          {transaction.lastUpdated ? new Date(transaction.lastUpdated).toLocaleString() : 'N/A'}
+                        <span className="reason" title={transaction.errorMessage ? `Full message: ${transaction.errorMessage}` : 'No error'}>
+                          {transaction.errorMessage || '-'}
                         </span>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="12" className="no-data">
+                    <td colSpan="7" className="no-data">
                       No transactions found
                     </td>
                   </tr>
@@ -597,46 +626,11 @@ function TransactionDetails({ transactions, ageGroup, onClose, allOrderTypes, al
         </div>
       </div>
 
-      {showItemsPopup && (
-        <>
-          <div className="items-popup-overlay" onClick={handleCloseItemsPopup} />
-          <div className="items-popup" onClick={(e) => e.stopPropagation()}>
-            <div className="items-popup-header">
-              <h3>Item Details</h3>
-              <button className="items-popup-close" onClick={handleCloseItemsPopup}>
-                <X size={20} />
-              </button>
-            </div>
-            <div className="items-popup-content">
-              <table className="items-table">
-                <thead>
-                  <tr>
-                    <th>Item ID</th>
-                    <th>Item Name</th>
-                    <th>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedItems.map((item, index) => (
-                    <tr key={index}>
-                      <td className="item-id">{item.itemId || 'N/A'}</td>
-                      <td>{item.name}</td>
-                      <td className="item-amount">${item.price}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="items-total">
-                    <td colSpan="2"><strong>Total</strong></td>
-                    <td className="item-amount">
-                      <strong>${selectedItems.reduce((sum, item) => sum + item.price, 0)}</strong>
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
-        </>
+      {selectedOrder && (
+        <OrderDetailsView 
+          order={selectedOrder} 
+          onClose={handleCloseOrderDetails} 
+        />
       )}
     </div>
   );

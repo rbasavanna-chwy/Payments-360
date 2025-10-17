@@ -22,6 +22,9 @@ public class Payment {
     @Column(nullable = false, unique = true)
     private String transactionId;
     
+    @Column(nullable = false, unique = true)
+    private String paymentReferenceId;
+    
     @Column(nullable = false)
     private String customerId;
     
@@ -44,6 +47,12 @@ public class Payment {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private PaymentMethod paymentMethod;
+    
+    @Column
+    private String cardType;
+    
+    @Column
+    private String validationStatus;
     
     @Column
     private String orderType;
@@ -70,4 +79,31 @@ public class Payment {
     
     @Column
     private String country;
+    
+    @Column
+    private Double approvalAmount;
+    
+    @Column
+    private Double approvedAmount;
+    
+    @Column
+    private Double depositingAmount;
+    
+    @Column
+    private Double depositedAmount;
+    
+    @Column
+    private Double reversingApprovalAmount;
+    
+    @Column
+    private Double reversingApprovedAmount;
+    
+    @Column
+    private Double refundAmount;
+    
+    @Column
+    private Double refundedAmount;
+    
+    @Column
+    private String orderStatus;
 }

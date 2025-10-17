@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { fetchAgedMetrics } from '../services/api';
 import './OverviewChart.css';
 
-function OverviewChart() {
+function OverviewChart({ onNavigate }) {
   const [dateFilter, setDateFilter] = useState('last_7_days');
   const [frequency, setFrequency] = useState('daily'); // 'hourly', 'daily', 'weekly', 'monthly'
   const [customDateRange, setCustomDateRange] = useState({ startDate: '', endDate: '' });
@@ -307,12 +307,44 @@ function OverviewChart() {
     return getColorWithOpacity(metric.color, state.shade);
   };
 
+  // Handle bar click to navigate to respective detail page
+  const handleApprovalClick = (data) => {
+    if (onNavigate) {
+      onNavigate('approvals');
+    }
+  };
+
+  const handleDepositClick = (data) => {
+    if (onNavigate) {
+      onNavigate('deposit');
+    }
+  };
+
+  const handleRefundClick = (data) => {
+    console.log('Refunds detail page not yet implemented');
+  };
+
+  const handleReverseApprovalClick = (data) => {
+    console.log('Reverse Approval detail page not yet implemented');
+  };
+
   return (
     <div className="overview-section">
       <div className="overview-header">
         <div className="overview-title">
           <BarChart3 size={24} />
           <h2>Overview</h2>
+          {!isCollapsed && onNavigate && (
+            <span style={{ 
+              fontSize: '12px', 
+              color: '#667eea', 
+              fontStyle: 'italic', 
+              marginLeft: '12px',
+              alignSelf: 'center'
+            }}>
+              (Click bars to view details)
+            </span>
+          )}
           {!isCollapsed && (
             <>
               <DateFilter 
@@ -320,13 +352,14 @@ function OverviewChart() {
                 setDateFilter={setDateFilter}
                 customDateRange={customDateRange}
                 setCustomDateRange={setCustomDateRange}
+                idPrefix="overview-chart"
               />
               <div className="frequency-filter">
-                <label htmlFor="frequency-select" style={{ fontSize: '14px', fontWeight: '500', marginRight: '8px' }}>
+                <label htmlFor="overview-frequency-select" style={{ fontSize: '14px', fontWeight: '500', marginRight: '8px' }}>
                   Frequency:
                 </label>
                 <select
-                  id="frequency-select"
+                  id="overview-frequency-select"
                   value={frequency}
                   onChange={(e) => setFrequency(e.target.value)}
                   style={{
@@ -419,24 +452,24 @@ function OverviewChart() {
               />
               
               {/* Approvals bars - using configured colors and shades */}
-              <Bar dataKey="Approvals-Success" stackId="approvals" fill={getMetricStateColor('approvals', 'success')} name="Approvals - Success" />
-              <Bar dataKey="Approvals-Processing" stackId="approvals" fill={getMetricStateColor('approvals', 'processing')} name="Approvals - Processing" />
-              <Bar dataKey="Approvals-Failed" stackId="approvals" fill={getMetricStateColor('approvals', 'failed')} name="Approvals - Failed" />
+              <Bar dataKey="Approvals-Success" stackId="approvals" fill={getMetricStateColor('approvals', 'success')} name="Approvals - Success" cursor="pointer" onClick={handleApprovalClick} />
+              <Bar dataKey="Approvals-Processing" stackId="approvals" fill={getMetricStateColor('approvals', 'processing')} name="Approvals - Processing" cursor="pointer" onClick={handleApprovalClick} />
+              <Bar dataKey="Approvals-Failed" stackId="approvals" fill={getMetricStateColor('approvals', 'failed')} name="Approvals - Failed" cursor="pointer" onClick={handleApprovalClick} />
               
               {/* Deposits bars - using configured colors and shades */}
-              <Bar dataKey="Deposits-Success" stackId="deposits" fill={getMetricStateColor('deposits', 'success')} name="Deposits - Success" />
-              <Bar dataKey="Deposits-Processing" stackId="deposits" fill={getMetricStateColor('deposits', 'processing')} name="Deposits - Processing" />
-              <Bar dataKey="Deposits-Failed" stackId="deposits" fill={getMetricStateColor('deposits', 'failed')} name="Deposits - Failed" />
+              <Bar dataKey="Deposits-Success" stackId="deposits" fill={getMetricStateColor('deposits', 'success')} name="Deposits - Success" cursor="pointer" onClick={handleDepositClick} />
+              <Bar dataKey="Deposits-Processing" stackId="deposits" fill={getMetricStateColor('deposits', 'processing')} name="Deposits - Processing" cursor="pointer" onClick={handleDepositClick} />
+              <Bar dataKey="Deposits-Failed" stackId="deposits" fill={getMetricStateColor('deposits', 'failed')} name="Deposits - Failed" cursor="pointer" onClick={handleDepositClick} />
               
               {/* Refunds bars - using configured colors and shades */}
-              <Bar dataKey="Refunds-Success" stackId="refunds" fill={getMetricStateColor('refunds', 'success')} name="Refunds - Success" />
-              <Bar dataKey="Refunds-Processing" stackId="refunds" fill={getMetricStateColor('refunds', 'processing')} name="Refunds - Processing" />
-              <Bar dataKey="Refunds-Failed" stackId="refunds" fill={getMetricStateColor('refunds', 'failed')} name="Refunds - Failed" />
+              <Bar dataKey="Refunds-Success" stackId="refunds" fill={getMetricStateColor('refunds', 'success')} name="Refunds - Success" cursor="pointer" onClick={handleRefundClick} />
+              <Bar dataKey="Refunds-Processing" stackId="refunds" fill={getMetricStateColor('refunds', 'processing')} name="Refunds - Processing" cursor="pointer" onClick={handleRefundClick} />
+              <Bar dataKey="Refunds-Failed" stackId="refunds" fill={getMetricStateColor('refunds', 'failed')} name="Refunds - Failed" cursor="pointer" onClick={handleRefundClick} />
               
               {/* Reverse Approval bars - using configured colors and shades */}
-              <Bar dataKey="Reverse-Success" stackId="reverse" fill={getMetricStateColor('reverseApproval', 'success')} name="Reverse - Success" />
-              <Bar dataKey="Reverse-Processing" stackId="reverse" fill={getMetricStateColor('reverseApproval', 'processing')} name="Reverse - Processing" />
-              <Bar dataKey="Reverse-Failed" stackId="reverse" fill={getMetricStateColor('reverseApproval', 'failed')} name="Reverse - Failed" />
+              <Bar dataKey="Reverse-Success" stackId="reverse" fill={getMetricStateColor('reverseApproval', 'success')} name="Reverse - Success" cursor="pointer" onClick={handleReverseApprovalClick} />
+              <Bar dataKey="Reverse-Processing" stackId="reverse" fill={getMetricStateColor('reverseApproval', 'processing')} name="Reverse - Processing" cursor="pointer" onClick={handleReverseApprovalClick} />
+              <Bar dataKey="Reverse-Failed" stackId="reverse" fill={getMetricStateColor('reverseApproval', 'failed')} name="Reverse - Failed" cursor="pointer" onClick={handleReverseApprovalClick} />
             </BarChart>
           </ResponsiveContainer>
           )}

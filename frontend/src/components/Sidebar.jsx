@@ -16,7 +16,7 @@ function Sidebar({ activeView, setActiveView, onCollapse }) {
   const menuItems = [
     { id: 'home', label: 'Home', icon: <Home size={20} /> },
     { id: 'approvals', label: 'Approvals Order Details', icon: <FileText size={20} /> },
-    { id: 'deposit', label: 'Deposit Approval Details', icon: <DollarSign size={20} /> },
+    { id: 'deposit', label: 'Deposit Order Details', icon: <DollarSign size={20} /> },
     { id: 'refunds', label: 'Refund Order Details', icon: <RefreshCw size={20} /> },
     { id: 'reverseApproval', label: 'Reverse Approval Order Details', icon: <RotateCcw size={20} /> },
     { id: 'dataAlerts', label: 'Data Alerts', icon: <Bell size={20} /> },

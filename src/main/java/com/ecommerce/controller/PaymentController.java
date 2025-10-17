@@ -4,7 +4,9 @@ import com.ecommerce.dto.PaymentStatistics;
 import com.ecommerce.model.Payment;
 import com.ecommerce.model.PaymentStatus;
 import com.ecommerce.model.PaymentMethod;
+import com.ecommerce.model.AlertSettings;
 import com.ecommerce.service.PaymentService;
+import com.ecommerce.service.AlertSettingsService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,9 +20,11 @@ import java.util.stream.Collectors;
 public class PaymentController {
     
     private final PaymentService paymentService;
+    private final AlertSettingsService alertSettingsService;
     
-    public PaymentController(PaymentService paymentService) {
+    public PaymentController(PaymentService paymentService, AlertSettingsService alertSettingsService) {
         this.paymentService = paymentService;
+        this.alertSettingsService = alertSettingsService;
     }
     
     @GetMapping
@@ -144,5 +148,39 @@ public class PaymentController {
         option.put("value", value);
         option.put("label", label);
         return option;
+    }
+    
+    // Alert Settings Endpoints
+    @GetMapping("/alert-settings")
+    public ResponseEntity<AlertSettings> getAlertSettings() {
+        try {
+            AlertSettings settings = alertSettingsService.getAlertSettings();
+            return ResponseEntity.ok(settings);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+    
+    @PostMapping("/alert-settings")
+    public ResponseEntity<?> saveAlertSettings(@RequestBody Map<String, Object> request) {
+        try {
+            Integer warningThreshold = (Integer) request.get("warningThreshold");
+            Integer criticalThreshold = (Integer) request.get("criticalThreshold");
+            String queryText = (String) request.get("queryText");
+            
+            if (warningThreshold == null || criticalThreshold == null) {
+                return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Both warningThreshold and criticalThreshold are required"));
+            }
+            
+            AlertSettings settings = alertSettingsService.saveAlertSettings(warningThreshold, criticalThreshold, queryText);
+            return ResponseEntity.ok(settings);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Failed to save alert settings"));
+        }
     }
 }

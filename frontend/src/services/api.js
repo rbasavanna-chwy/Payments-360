@@ -81,4 +81,19 @@ export const fetchAgedMetrics = async (orderType, paymentMethod, paymentState, d
   return response.data;
 };
 
+// Alert Settings endpoints
+export const fetchAlertSettings = async () => {
+  const response = await api.get('/payments/alert-settings');
+  return response.data;
+};
+
+export const saveAlertSettings = async (warningThreshold, criticalThreshold, queryText) => {
+  const response = await api.post('/payments/alert-settings', {
+    warningThreshold,
+    criticalThreshold,
+    queryText
+  });
+  return response.data;
+};
+
 export default api;

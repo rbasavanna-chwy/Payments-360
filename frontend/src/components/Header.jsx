@@ -2,8 +2,14 @@ import React, { useState } from 'react';
 import { Search, Settings } from 'lucide-react';
 import './Header.css';
 
-function Header({ searchQuery, setSearchQuery }) {
+function Header({ searchQuery, setSearchQuery, onSearchOrderId }) {
   const [showSettings, setShowSettings] = useState(false);
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && searchQuery.trim() && onSearchOrderId) {
+      onSearchOrderId(searchQuery);
+    }
+  };
 
   return (
     <header className="header">
@@ -18,9 +24,10 @@ function Header({ searchQuery, setSearchQuery }) {
               id="orderSearch"
               type="text"
               className="search-input"
-              placeholder="Search by Order ID..."
+              placeholder="Search by Order ID... (Press Enter)"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyPress={handleKeyPress}
             />
           </div>
         </div>

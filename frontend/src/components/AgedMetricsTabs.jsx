@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { AlertTriangle, Clock, DollarSign, RefreshCw, Bell, Info, Calendar, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
+import { AlertTriangle, Clock, DollarSign, RefreshCw, Bell, Info, Calendar, ChevronDown, ChevronUp, RotateCcw, Settings } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { fetchPaymentStatuses, fetchPaymentMethods, fetchOrderTypes, fetchAgedMetrics } from '../services/api';
+import { fetchPaymentStatuses, fetchPaymentMethods, fetchOrderTypes, fetchAgedMetrics, fetchPayments, fetchAlertSettings, saveAlertSettings } from '../services/api';
 import DateFilter from './DateFilter';
 import TransactionDetails from './TransactionDetails';
 import './AgedMetricsTabs.css';
@@ -51,16 +51,47 @@ function AgedMetricsTabs() {
   const [showTooltip, setShowTooltip] = useState(null); // Now tracks which tab's tooltip is showing
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [orderType, setOrderType] = useState('all'); // 'all', 'regular', 'subscription'
-  const [paymentMethod, setPaymentMethod] = useState('all'); // 'all', 'creditcard', 'paypal', 'applepay', 'giftcard', 'accountbalance'
-  const [paymentState, setPaymentState] = useState('all'); // 'all', 'success', 'processing', 'failed', 'canceled', 'expired', 'declined', 'pending'
-  const [dateFilter, setDateFilter] = useState('last_7_days');
-  const [customDateRange, setCustomDateRange] = useState({ startDate: '', endDate: '' });
-  const [frequency, setFrequency] = useState('daily'); // 'hourly', 'daily', 'weekly', 'monthly'
+  
+  // Tab-specific filter states - each tab has its own independent filters
+  const [tabFilters, setTabFilters] = useState({
+    approvals: {
+      orderType: 'all',
+      paymentMethod: 'all',
+      paymentState: 'all',
+      dateFilter: 'last_7_days',
+      customDateRange: { startDate: '', endDate: '' },
+      frequency: 'daily'
+    },
+    deposit: {
+      orderType: 'all',
+      paymentMethod: 'all',
+      paymentState: 'all',
+      dateFilter: 'last_7_days',
+      customDateRange: { startDate: '', endDate: '' },
+      frequency: 'daily'
+    },
+    refunds: {
+      orderType: 'all',
+      paymentMethod: 'all',
+      paymentState: 'all',
+      dateFilter: 'last_7_days',
+      customDateRange: { startDate: '', endDate: '' },
+      frequency: 'daily'
+    },
+    reverseApproval: {
+      orderType: 'all',
+      paymentMethod: 'all',
+      paymentState: 'all',
+      dateFilter: 'last_7_days',
+      customDateRange: { startDate: '', endDate: '' },
+      frequency: 'daily'
+    }
+  });
   
   // API data states
   const [apiData, setApiData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [allPayments, setAllPayments] = useState([]);
   const [dateRanges, setDateRanges] = useState({
     approvals: defaultRange,
     deposit: defaultRange,
@@ -75,151 +106,160 @@ function AgedMetricsTabs() {
   const [selectedAgeGroup, setSelectedAgeGroup] = useState(null);
   const [ageGroupTransactions, setAgeGroupTransactions] = useState([]);
   
+  // Alert threshold settings
+  const [criticalThreshold, setCriticalThreshold] = useState(100); // Default 100% for critical alert
+  const [warningThreshold, setWarningThreshold] = useState(75); // Default 75% for warning alert
+  const [queryText, setQueryText] = useState(''); // Query text for alerts
+  const [dismissedAlerts, setDismissedAlerts] = useState({}); // Track dismissed alerts per tab
+  const [showAlertSettings, setShowAlertSettings] = useState(false); // Toggle for alert settings visibility
+  const [tempCriticalThreshold, setTempCriticalThreshold] = useState(100); // Temporary value for editing
+  const [tempWarningThreshold, setTempWarningThreshold] = useState(75); // Temporary value for editing
+  const [tempQueryText, setTempQueryText] = useState(''); // Temporary value for editing
+  
   // Filter options from API
   const [orderTypeOptions, setOrderTypeOptions] = useState([]);
   const [paymentMethodOptions, setPaymentMethodOptions] = useState([]);
   const [paymentStateOptions, setPaymentStateOptions] = useState([]);
+  
+  // Helper functions to get/set filters for the current active tab
+  const getCurrentTabFilters = () => tabFilters[activeTab];
+  const updateTabFilter = (filterName, value) => {
+    // If changing the date filter dropdown, clear the date range calendar filters
+    if (filterName === 'dateFilter') {
+      setDateRanges(prev => ({
+        ...prev,
+        [activeTab]: { from: '', to: '' }
+      }));
+    }
+    
+    setTabFilters(prev => ({
+      ...prev,
+      [activeTab]: {
+        ...prev[activeTab],
+        [filterName]: value
+      }
+    }));
+  };
+  
+  // Shortcuts for current tab's filter values
+  const orderType = tabFilters[activeTab].orderType;
+  const paymentMethod = tabFilters[activeTab].paymentMethod;
+  const paymentState = tabFilters[activeTab].paymentState;
+  const dateFilter = tabFilters[activeTab].dateFilter;
+  const customDateRange = tabFilters[activeTab].customDateRange;
+  const frequency = tabFilters[activeTab].frequency;
   const [filtersLoading, setFiltersLoading] = useState(true);
 
-  // Generate sample data with actual dates - memoized to only run once
-  const generateSampleData = useMemo(() => {
-    return (scenarios) => {
-      const now = new Date();
-      const data = [];
-      const paymentStates = ['success', 'processing', 'failed', 'canceled', 'expired', 'declined', 'pending'];
-      const productNames = [
-        'Premium Subscription', 'Basic Plan', 'Pro Package', 'Starter Kit', 
-        'Monthly Membership', 'Annual Pass', 'Digital Download', 'Gift Card',
-        'Product Bundle', 'Service Package', 'Elite Access', 'Standard Package'
-      ];
+  // Sample data - memoized to categorize payments from API
+  const sampleDataCache = useMemo(() => {
+    if (!allPayments || allPayments.length === 0) {
+      // Return empty structure if no payments loaded yet
+      return {
+        approvals: [],
+        deposit: [],
+        refunds: [],
+        reverseApproval: []
+      };
+    }
 
-      let orderIdCounter = 1000;
-      let customerIdCounter = 5000;
-
-      scenarios.forEach(scenario => {
-        for (let i = 0; i < scenario.count; i++) {
-          const date = new Date(now);
-          date.setDate(date.getDate() - scenario.days - Math.floor(Math.random() * 2));
-          
-          // Generate random number of items (1-5) with prices
-          const itemCount = Math.floor(Math.random() * 5) + 1;
-          const items = [];
-          let totalItemAmount = 0;
-          for (let j = 0; j < itemCount; j++) {
-            const itemPrice = Math.floor(Math.random() * 150) + 10; // Price between $10-$160
-            items.push({
-              itemId: `ITEM-${1000 + Math.floor(Math.random() * 9000)}`,
-              name: productNames[Math.floor(Math.random() * productNames.length)],
-              price: itemPrice
-            });
-            totalItemAmount += itemPrice;
-          }
-          
-          // Generate last updated time (1-6 hours after creation)
-          const lastUpdated = new Date(date);
-          lastUpdated.setHours(lastUpdated.getHours() + Math.floor(Math.random() * 6) + 1);
-          
-          data.push({
-            id: `txn_${orderIdCounter}_${Date.now()}_${i}`,
-            customerId: `CUST-${customerIdCounter + Math.floor(Math.random() * 500)}`,
-            orderId: `ORD-${orderIdCounter++}`,
-            items: items,
-            itemCount: itemCount,
-            date: date.toISOString(),
-            lastUpdated: lastUpdated.toISOString(),
-            amount: totalItemAmount,
-            orderType: ['regular', 'subscription', 'onetime', 'cvc_no_show_penality', 'loyalty', 'cwav_telemedicine'][Math.floor(Math.random() * 6)],
-            paymentMethod: ['creditcard', 'paypal', 'applepay', 'giftcard', 'accountbalance'][Math.floor(Math.random() * 5)],
-            paymentState: paymentStates[Math.floor(Math.random() * paymentStates.length)]
-          });
-        }
-      });
-
-      return data.sort((a, b) => new Date(b.date) - new Date(a.date));
+    // Convert API payment data to frontend format and categorize by tab
+    const categorizedData = {
+      approvals: [],
+      deposit: [],
+      refunds: [],
+      reverseApproval: []
     };
-  }, []);
 
-  // Sample data - memoized to only generate once
-  const sampleDataCache = useMemo(() => ({
-    approvals: generateSampleData([
-      { days: 0, count: 12, amount: 15240 },
-      { days: 2, count: 8, amount: 9850 },
-      { days: 5, count: 5, amount: 6320 },
-      { days: 10, count: 3, amount: 4150 }
-    ]),
-    deposit: generateSampleData([
-      { days: 0, count: 45, amount: 48920 },
-      { days: 2, count: 18, amount: 22340 },
-      { days: 5, count: 7, amount: 8450 },
-      { days: 10, count: 2, amount: 3200 }
-    ]),
-    refunds: generateSampleData([
-      { days: 0, count: 6, amount: 3240 },
-      { days: 2, count: 9, amount: 5680 },
-      { days: 5, count: 4, amount: 2890 },
-      { days: 10, count: 2, amount: 1450 }
-    ]),
-    reverseApproval: generateSampleData([
-      { days: 0, count: 4, amount: 5240 },
-      { days: 2, count: 7, amount: 8350 },
-      { days: 5, count: 3, amount: 4120 },
-      { days: 10, count: 2, amount: 2890 }
-    ])
-  }), [generateSampleData]);
+    allPayments.forEach(payment => {
+      // Convert payment to frontend format
+      const formattedPayment = {
+        id: payment.id,
+        orderId: payment.orderId,
+        transactionId: payment.transactionId,
+        customerId: payment.customerId,
+        customerName: payment.customerName,
+        customerEmail: payment.customerEmail,
+        amount: payment.amount,
+        date: payment.createdAt,
+        lastUpdated: payment.updatedAt || payment.createdAt,
+        orderType: payment.orderType?.toLowerCase() || 'regular',
+        paymentMethod: payment.paymentMethod?.toLowerCase().replace(/_/g, '') || 'creditcard',
+        paymentState: payment.status?.toLowerCase() || 'pending',
+        cardType: payment.cardType, // Include card type for credit cards
+        validationStatus: payment.validationStatus, // Include validation status
+        errorMessage: payment.errorMessage, // Include error message
+        // Include all amount fields for proper display in OrderDetailsView
+        approvalAmount: payment.approvalAmount,
+        approvedAmount: payment.approvedAmount,
+        depositingAmount: payment.depositingAmount,
+        depositedAmount: payment.depositedAmount,
+        refundAmount: payment.refundAmount,
+        refundedAmount: payment.refundedAmount,
+        reversingApprovalAmount: payment.reversingApprovalAmount,
+        reversingApprovedAmount: payment.reversingApprovedAmount
+      };
+
+      // Categorize based on amount fields:
+      // Approvals: has approvalAmount or approvedAmount
+      // Deposits: has depositingAmount or depositedAmount  
+      // Refunds: has refundAmount or refundedAmount
+      // Reverse Approval: has reversingApprovalAmount or reversingApprovedAmount
+
+      if (payment.approvalAmount > 0 || payment.approvedAmount > 0) {
+        categorizedData.approvals.push(formattedPayment);
+      }
+      
+      if (payment.depositingAmount > 0 || payment.depositedAmount > 0) {
+        categorizedData.deposit.push(formattedPayment);
+      }
+      
+      if (payment.refundAmount > 0 || payment.refundedAmount > 0) {
+        categorizedData.refunds.push(formattedPayment);
+      }
+      
+      if (payment.reversingApprovalAmount > 0 || payment.reversingApprovedAmount > 0) {
+        categorizedData.reverseApproval.push(formattedPayment);
+      }
+    });
+
+    return categorizedData;
+  }, [allPayments]);
 
   // Original unfiltered data - memoized to prevent recreation
-  const originalData = useMemo(() => ({
+  // This is just the raw data structure - actual age groups will be calculated by filters
+  const originalData = useMemo(() => {
+    return {
     approvals: {
       title: 'Approvals',
       icon: <Clock size={20} />,
       infoText: 'Default Pending Approvals since 7 days',
       sampleData: sampleDataCache.approvals,
-      items: [
-        { label: '0-24 hours', count: 12, amount: '$15,240.00' },
-        { label: '1-3 days', count: 8, amount: '$9,850.00' },
-        { label: '3-5 days', count: 5, amount: '$6,320.00' },
-        { label: '5-7 days', count: 3, amount: '$4,150.00' }
-      ],
-      total: { count: 28, amount: '$35,560.00' }
+        items: [], // Will be calculated by applyFiltersToTab
+        total: { count: 0, amount: '$0.00' }
     },
     deposit: {
       title: 'Deposits',
       icon: <DollarSign size={20} />,
       infoText: 'Default Pending Deposits since 7 days',
       sampleData: sampleDataCache.deposit,
-      items: [
-        { label: '0-24 hours', count: 45, amount: '$48,920.00' },
-        { label: '1-3 days', count: 18, amount: '$22,340.00' },
-        { label: '3-5 days', count: 7, amount: '$8,450.00' },
-        { label: '5-7 days', count: 2, amount: '$3,200.00' }
-      ],
-      total: { count: 72, amount: '$82,910.00' }
+        items: [], // Will be calculated by applyFiltersToTab
+        total: { count: 0, amount: '$0.00' }
     },
     refunds: {
       title: 'Refunds',
       icon: <RefreshCw size={20} />,
       infoText: 'Default Pending Refunds since 7 days',
       sampleData: sampleDataCache.refunds,
-      items: [
-        { label: '0-24 hours', count: 6, amount: '$3,240.00' },
-        { label: '1-3 days', count: 9, amount: '$5,680.00' },
-        { label: '3-5 days', count: 4, amount: '$2,890.00' },
-        { label: '5-7 days', count: 2, amount: '$1,450.00' }
-      ],
-      total: { count: 21, amount: '$13,260.00' }
+        items: [], // Will be calculated by applyFiltersToTab
+        total: { count: 0, amount: '$0.00' }
     },
     reverseApproval: {
       title: 'Reverse Approval',
       icon: <RotateCcw size={20} />,
       infoText: 'Default Pending Reverse Approvals since 7 days',
       sampleData: sampleDataCache.reverseApproval,
-      items: [
-        { label: '0-24 hours', count: 4, amount: '$5,240.00' },
-        { label: '1-3 days', count: 7, amount: '$8,350.00' },
-        { label: '3-5 days', count: 3, amount: '$4,120.00' },
-        { label: '5-7 days', count: 2, amount: '$2,890.00' }
-      ],
-      total: { count: 16, amount: '$20,600.00' }
+        items: [], // Will be calculated by applyFiltersToTab
+        total: { count: 0, amount: '$0.00' }
     },
     alerts: {
       title: 'Alerts',
@@ -234,52 +274,53 @@ function AgedMetricsTabs() {
       ],
       total: { count: 63, label: 'Total Active Alerts' }
     }
-  }), [sampleDataCache]);
+    };
+  }, [sampleDataCache]);
 
-  // Use API data if available, otherwise fall back to originalData
+  // Use filteredData if available, otherwise fall back to originalData
   const metricsData = useMemo(() => {
-    if (loading || !apiData) {
-      // Show loading state or empty data
+    // Use filteredData if it exists (which has properly separated tab-specific data)
+    if (filteredData) {
       return {
-        approvals: { title: 'Approvals', icon: <Clock size={20} />, items: [], total: { count: 0, amount: '$0.00' } },
-        deposit: { title: 'Deposits', icon: <DollarSign size={20} />, items: [], total: { count: 0, amount: '$0.00' } },
-        refunds: { title: 'Refunds', icon: <RefreshCw size={20} />, items: [], total: { count: 0, amount: '$0.00' } },
-        reverseApproval: { title: 'Reverse Approval', icon: <AlertTriangle size={20} />, items: [], total: { count: 0, amount: '$0.00' } }
+        approvals: {
+          ...filteredData.approvals,
+          icon: <Clock size={20} />
+        },
+        deposit: {
+          ...filteredData.deposit,
+          icon: <DollarSign size={20} />
+        },
+        refunds: {
+          ...filteredData.refunds,
+          icon: <RefreshCw size={20} />
+        },
+        reverseApproval: {
+          ...filteredData.reverseApproval,
+          icon: <RotateCcw size={20} />
+        }
       };
     }
     
-    // Use API data for all tabs (assuming all tabs use the same data structure for now)
+    // Fall back to originalData if no filtered data yet
     return {
       approvals: {
-        title: 'Approvals',
-        icon: <Clock size={20} />,
-        infoText: 'Pending Approvals',
-        items: apiData.items || [],
-        total: apiData.total || { count: 0, amount: '$0.00' }
+        ...originalData.approvals,
+        icon: <Clock size={20} />
       },
       deposit: {
-        title: 'Deposits',
-        icon: <DollarSign size={20} />,
-        infoText: 'Deposit Transactions',
-        items: apiData.items || [],
-        total: apiData.total || { count: 0, amount: '$0.00' }
+        ...originalData.deposit,
+        icon: <DollarSign size={20} />
       },
       refunds: {
-        title: 'Refunds',
-        icon: <RefreshCw size={20} />,
-        infoText: 'Refund Transactions',
-        items: apiData.items || [],
-        total: apiData.total || { count: 0, amount: '$0.00' }
+        ...originalData.refunds,
+        icon: <RefreshCw size={20} />
       },
       reverseApproval: {
-        title: 'Reverse Approval',
-        icon: <AlertTriangle size={20} />,
-        infoText: 'Reverse Approval Transactions',
-        items: apiData.items || [],
-        total: apiData.total || { count: 0, amount: '$0.00' }
+        ...originalData.reverseApproval,
+        icon: <RotateCcw size={20} />
       }
     };
-  }, [loading, apiData]);
+  }, [filteredData, originalData]);
 
   // Generate dynamic info text based on active filters
   const generateInfoText = (tabId) => {
@@ -306,22 +347,31 @@ function AgedMetricsTabs() {
       'custom': 'Custom range'
     };
     
-    const hasFilters = dateFilter || 
+    // Get tab-specific filters
+    const tabFilterValues = tabFilters[tabId];
+    const tabPaymentState = tabFilterValues.paymentState;
+    const tabOrderType = tabFilterValues.orderType;
+    const tabPaymentMethod = tabFilterValues.paymentMethod;
+    const tabDateFilter = tabFilterValues.dateFilter;
+    
+    const hasFilters = tabDateFilter || 
                        dateRanges[tabId].from || 
                        dateRanges[tabId].to || 
-                       orderType !== 'all' || 
-                       paymentMethod !== 'all' || 
-                       paymentState !== 'all';
+                       tabOrderType !== 'all' || 
+                       tabPaymentMethod !== 'all' || 
+                       tabPaymentState !== 'all';
     
     if (!hasFilters) {
-      return `Default Pending ${tabNames[tabId]} since 7 days`;
+      return `All ${tabNames[tabId]} - Last 7 days`;
     }
     
-    let parts = [`Pending ${tabNames[tabId]}`];
+    // Start with payment state if specified, otherwise "All"
+    const stateLabel = tabPaymentState !== 'all' ? tabPaymentState.charAt(0).toUpperCase() + tabPaymentState.slice(1) : 'All';
+    let parts = [`${stateLabel} ${tabNames[tabId]}`];
     
     // Add date filter info
-    if (dateFilter) {
-      parts.push(dateFilterLabels[dateFilter] || dateFilter);
+    if (tabDateFilter) {
+      parts.push(dateFilterLabels[tabDateFilter] || tabDateFilter);
     }
     
     // Add date range info (old calendar)
@@ -331,11 +381,10 @@ function AgedMetricsTabs() {
       parts.push(`from ${fromDate} to ${toDate}`);
     }
     
-    // Add filter info
+    // Add additional filter info (excluding payment state since it's already in the label)
     const filters = [];
-    if (paymentState !== 'all') filters.push(`State: ${paymentState.toUpperCase()}`);
-    if (orderType !== 'all') filters.push(`Type: ${orderType}`);
-    if (paymentMethod !== 'all') filters.push(`Method: ${paymentMethod}`);
+    if (tabOrderType !== 'all') filters.push(`Type: ${tabOrderType}`);
+    if (tabPaymentMethod !== 'all') filters.push(`Method: ${tabPaymentMethod}`);
     
     if (filters.length > 0) {
       parts.push(`(${filters.join(', ')})`);
@@ -353,42 +402,186 @@ function AgedMetricsTabs() {
 
   const currentData = metricsData[activeTab];
 
-  // Generate alert chart data - shows non-success transactions over the last 7 days
-  const generateAlertsFromData = (data) => {
+  // Custom tooltip for alert chart showing payment state breakdown
+  const CustomAlertTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      const stateBreakdown = data.stateBreakdown || {};
+      const totalCount = data.count || 0;
+      
+      // Format payment state names
+      const formatStateName = (state) => {
+        if (state === 'undefined') return 'Undefined State';
+        return state.charAt(0).toUpperCase() + state.slice(1);
+      };
+      
+      return (
+        <div style={{
+          backgroundColor: '#fff',
+          border: '1px solid #e2e8f0',
+          borderRadius: '8px',
+          padding: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+        }}>
+          <p style={{ fontWeight: 'bold', marginBottom: '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px' }}>
+            {label}
+          </p>
+          <p style={{ marginBottom: '8px', fontWeight: '600', color: '#374151' }}>
+            Total Non-Success: {totalCount}
+          </p>
+          {Object.keys(stateBreakdown).length > 0 ? (
+            <div style={{ fontSize: '13px' }}>
+              <p style={{ fontWeight: '600', marginBottom: '4px', color: '#6b7280' }}>Breakdown:</p>
+              {Object.entries(stateBreakdown)
+                .sort((a, b) => b[1] - a[1]) // Sort by count descending
+                .map(([state, count]) => (
+                  <div key={state} style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    marginBottom: '2px',
+                    paddingLeft: '8px'
+                  }}>
+                    <span style={{ color: '#4b5563' }}>{formatStateName(state)}:</span>
+                    <span style={{ fontWeight: '600', marginLeft: '12px', color: '#111827' }}>{count}</span>
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <p style={{ fontSize: '13px', color: '#9ca3af', fontStyle: 'italic' }}>No data</p>
+          )}
+        </div>
+      );
+    }
+    return null;
+  };
+
+  // Generate alert chart data - shows non-success transactions based on date filter and frequency
+  const generateAlertsFromData = (data, dateFilterParam, frequencyParam) => {
     if (!data || data.length === 0) return [];
 
     const now = new Date();
     const periods = [];
     
-    // Create 7 daily periods (last 7 days)
-    for (let i = 6; i >= 0; i--) {
-      const periodDate = new Date(now);
-      periodDate.setDate(now.getDate() - i);
-      periodDate.setHours(0, 0, 0, 0);
+    // Determine the date range based on the filter
+    const dateRange = getDateRangeFromFilter(dateFilterParam, customDateRange);
+    if (!dateRange) return [];
+    
+    const startDate = dateRange.startDate;
+    const endDate = dateRange.endDate;
+    
+    // Generate periods based on frequency
+    if (frequencyParam === 'hourly') {
+      // Generate hourly periods
+      const startHour = new Date(startDate);
+      startHour.setMinutes(0, 0, 0);
+      const endHour = new Date(endDate);
       
-      const nextDay = new Date(periodDate);
-      nextDay.setDate(periodDate.getDate() + 1);
+      let currentHour = new Date(startHour);
+      while (currentHour <= endHour) {
+        const nextHour = new Date(currentHour);
+        nextHour.setHours(currentHour.getHours() + 1);
       
       periods.push({
-        date: periodDate,
-        label: i === 0 ? 'Today' : i === 1 ? 'Yesterday' : periodDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        fullLabel: periodDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          date: new Date(currentHour),
+          label: currentHour.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', hour12: true }),
+          fullLabel: currentHour.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', hour12: true }),
         count: 0,
-        periodStart: periodDate,
-        periodEnd: nextDay
-      });
+          periodStart: new Date(currentHour),
+          periodEnd: nextHour,
+          stateBreakdown: {}
+        });
+        
+        currentHour = nextHour;
+      }
+    } else if (frequencyParam === 'weekly') {
+      // Generate weekly periods
+      const startWeek = new Date(startDate);
+      startWeek.setHours(0, 0, 0, 0);
+      const dayOfWeek = startWeek.getDay();
+      startWeek.setDate(startWeek.getDate() - dayOfWeek); // Go to start of week (Sunday)
+      
+      let currentWeek = new Date(startWeek);
+      while (currentWeek <= endDate) {
+        const nextWeek = new Date(currentWeek);
+        nextWeek.setDate(currentWeek.getDate() + 7);
+        
+        const weekEnd = new Date(currentWeek);
+        weekEnd.setDate(currentWeek.getDate() + 6);
+        
+        periods.push({
+          date: new Date(currentWeek),
+          label: `${currentWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+          fullLabel: `Week of ${currentWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+          count: 0,
+          periodStart: new Date(currentWeek),
+          periodEnd: nextWeek,
+          stateBreakdown: {}
+        });
+        
+        currentWeek = nextWeek;
+      }
+    } else if (frequencyParam === 'monthly') {
+      // Generate monthly periods
+      const startMonth = new Date(startDate);
+      startMonth.setDate(1);
+      startMonth.setHours(0, 0, 0, 0);
+      
+      let currentMonth = new Date(startMonth);
+      while (currentMonth <= endDate) {
+        const nextMonth = new Date(currentMonth);
+        nextMonth.setMonth(currentMonth.getMonth() + 1);
+        
+        periods.push({
+          date: new Date(currentMonth),
+          label: currentMonth.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+          fullLabel: currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+          count: 0,
+          periodStart: new Date(currentMonth),
+          periodEnd: nextMonth,
+          stateBreakdown: {}
+        });
+        
+        currentMonth = nextMonth;
+      }
+    } else {
+      // Default: daily periods
+      let currentDay = new Date(startDate);
+      currentDay.setHours(0, 0, 0, 0);
+      
+      while (currentDay <= endDate) {
+        const nextDay = new Date(currentDay);
+        nextDay.setDate(currentDay.getDate() + 1);
+        
+        const isToday = currentDay.toDateString() === now.toDateString();
+        const isYesterday = currentDay.toDateString() === new Date(now.getTime() - 24 * 60 * 60 * 1000).toDateString();
+        
+        periods.push({
+          date: new Date(currentDay),
+          label: isToday ? 'Today' : isYesterday ? 'Yesterday' : currentDay.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          fullLabel: currentDay.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          count: 0,
+          periodStart: new Date(currentDay),
+          periodEnd: nextDay,
+          stateBreakdown: {}
+        });
+        
+        currentDay = nextDay;
+      }
     }
     
-    // Count only non-success transactions for each day
+    // Count only non-success transactions for each period and track by state
     data.forEach(item => {
-      // Only include non-success transactions
-      if (item.paymentState && item.paymentState !== 'success') {
+      // Include non-success transactions (including null/undefined as non-success)
+      if (item.paymentState !== 'success') {
         const itemDate = new Date(item.date);
         
         // Find which period this transaction belongs to
         for (const period of periods) {
           if (itemDate >= period.periodStart && itemDate < period.periodEnd) {
             period.count++;
+            // Track by payment state
+            const state = item.paymentState || 'undefined';
+            period.stateBreakdown[state] = (period.stateBreakdown[state] || 0) + 1;
             break;
           }
         }
@@ -398,65 +591,7 @@ function AgedMetricsTabs() {
     return periods;
   };
 
-  // Generate dynamic alerts based on current tab's data (last 7 days, non-success only)
-  const currentAlerts = useMemo(() => {
-    const dataSource = metricsData[activeTab];
-    if (dataSource && dataSource.sampleData) {
-      // Generate alerts for last 7 days with non-success transactions
-      const alerts = generateAlertsFromData(dataSource.sampleData);
-      const totalCount = alerts.reduce((sum, alert) => sum + alert.count, 0);
-      
-      // Calculate non-success percentage from original unfiltered data
-      const originalDataSource = originalData[activeTab];
-      const originalTotal = originalDataSource?.sampleData?.length || 0;
-      const originalNonSuccessCount = originalDataSource?.sampleData?.filter(item => 
-        item.paymentState && item.paymentState !== 'success'
-      ).length || 0;
-      const nonSuccessPercentage = originalTotal > 0 ? (originalNonSuccessCount / originalTotal) * 100 : 0;
-      
-      // Determine if we should show the graph
-      let alertLevel = 'none';
-      let showGraph = false;
-      
-      if (nonSuccessPercentage >= 70) {
-        alertLevel = 'critical';
-        showGraph = true;
-      } else if (nonSuccessPercentage >= 50) {
-        alertLevel = 'warning';
-        showGraph = true;
-      }
-      
-      return {
-        items: alerts,
-        total: { count: totalCount, label: 'Total Non-Success Transactions (Last 7 Days)' },
-        showGraph: showGraph,
-        alertLevel: alertLevel,
-        percentage: nonSuccessPercentage,
-        nonSuccessCount: originalNonSuccessCount,
-        totalTransactions: originalTotal,
-        periodLabel: 'Last 7 Days'
-      };
-    }
-    
-    return { 
-      items: [], 
-      total: { count: 0, label: 'Total Non-Success Transactions (Last 7 Days)' },
-      showGraph: false,
-      alertLevel: 'none',
-      percentage: 0,
-      nonSuccessCount: 0,
-      totalTransactions: 0,
-      periodLabel: 'Last 7 Days'
-    };
-  }, [activeTab, metricsData, originalData]);
-
-  const handleTabChange = (tabId) => {
-    setActiveTab(tabId);
-    setShowTooltip(null);
-  };
-
-
-  // Convert date filter selection to actual date range
+  // Helper function: Convert date filter selection to actual date range
   const getDateRangeFromFilter = (filter, customRange) => {
     const now = new Date();
     let startDate = null;
@@ -501,7 +636,7 @@ function AgedMetricsTabs() {
         startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
         break;
       case 'custom':
-        if (customRange.startDate && customRange.endDate) {
+        if (customRange && customRange.startDate && customRange.endDate) {
           startDate = new Date(customRange.startDate);
           endDate = new Date(customRange.endDate);
         }
@@ -513,6 +648,7 @@ function AgedMetricsTabs() {
     return startDate ? { startDate, endDate } : null;
   };
 
+  // Helper functions for filtering data
   const filterDataByDate = (data, fromDate, toDate) => {
     if (!fromDate && !toDate) return data;
     
@@ -526,7 +662,9 @@ function AgedMetricsTabs() {
   
   const filterDataByDateFilter = (data, filter, customRange) => {
     const dateRange = getDateRangeFromFilter(filter, customRange);
-    if (!dateRange) return data;
+    if (!dateRange) {
+      return data;
+    }
     
     return data.filter(item => {
       const itemDate = new Date(item.date);
@@ -541,12 +679,158 @@ function AgedMetricsTabs() {
 
   const filterDataByPaymentMethod = (data, method) => {
     if (method === 'all') return data;
-    return data.filter(item => item.paymentMethod === method);
+    // Normalize both sides by removing underscores for comparison
+    const normalizedMethod = method.toLowerCase().replace(/_/g, '');
+    return data.filter(item => {
+      const itemMethod = item.paymentMethod?.toLowerCase().replace(/_/g, '');
+      return itemMethod === normalizedMethod;
+    });
   };
 
   const filterDataByPaymentState = (data, state) => {
     if (state === 'all') return data;
-    return data.filter(item => item.paymentState === state);
+    // Normalize both sides by removing underscores for comparison
+    const normalizedState = state.toLowerCase().replace(/_/g, '');
+    return data.filter(item => {
+      const itemState = item.paymentState?.toLowerCase().replace(/_/g, '');
+      return itemState === normalizedState;
+    });
+  };
+
+  // Generate dynamic alerts based on current tab's data
+  const currentAlerts = useMemo(() => {
+    // Helper function to get human-readable date period label
+    const getDatePeriodLabel = () => {
+      const labels = {
+        'last_15_min': 'Last 15 Minutes',
+        'last_1_hour': 'Last 1 Hour',
+        'last_24_hours': 'Last 24 Hours',
+        'last_7_days': 'Last 7 Days',
+        'last_28_days': 'Last 28 Days',
+        'last_3_months': 'Last 3 Months',
+        'last_1_year': 'Last 1 Year'
+      };
+      return labels[dateFilter] || 'Selected Period';
+    };
+    
+    // Helper function to get dynamic label based on active tab
+    const getDynamicLabel = () => {
+      const periodLabel = getDatePeriodLabel();
+      const labels = {
+        approvals: `Total Non-Success Approvals (${periodLabel})`,
+        deposits: `Total Non-Success Deposits (${periodLabel})`,
+        refunds: `Total Non-Success Refunds (${periodLabel})`,
+        reverseApproval: `Total Non-Success Reverse Approvals (${periodLabel})`
+      };
+      return labels[activeTab] || `Total Non-Success Transactions (${periodLabel})`;
+    };
+    
+    // Get original unfiltered data to apply filters manually
+    // This ensures we use the EXACT same filtering logic as the Age Distribution chart
+    const originalDataSource = originalData[activeTab];
+    if (!originalDataSource || !originalDataSource.sampleData) {
+      return { 
+        items: [], 
+        total: { count: 0, label: getDynamicLabel() },
+        showGraph: false,
+        alertLevel: 'none',
+        percentage: 0,
+        nonSuccessCount: 0,
+        totalTransactions: 0,
+        periodLabel: getDatePeriodLabel()
+      };
+    }
+    
+    // Apply the EXACT SAME filters as applyFiltersToTab (including payment state)
+    // This ensures alert counts MATCH the Age Distribution chart exactly
+    let alertData = [...originalDataSource.sampleData];
+    
+    // Apply date period filter (from dropdown) - SAME as applyFiltersToTab
+    if (dateFilter) {
+      alertData = filterDataByDateFilter(alertData, dateFilter, customDateRange);
+    }
+    
+    // Apply date range filters (from calendar) - SAME as applyFiltersToTab
+    const from = dateRanges[activeTab]?.from;
+    const to = dateRanges[activeTab]?.to;
+    alertData = filterDataByDate(alertData, from, to);
+    
+    // Apply order type filter - SAME as applyFiltersToTab
+    alertData = filterDataByOrderType(alertData, orderType);
+    
+    // Apply payment method filter - SAME as applyFiltersToTab
+    alertData = filterDataByPaymentMethod(alertData, paymentMethod);
+    
+    // Apply payment state filter - SAME as applyFiltersToTab
+    // This ensures alert counts MATCH the Age Distribution chart exactly
+    alertData = filterDataByPaymentState(alertData, paymentState);
+    
+    if (alertData.length > 0) {
+      // Generate alerts chart (distributes transactions based on date filter and frequency)
+      const alerts = generateAlertsFromData(alertData, dateFilter, frequency);
+      
+      // Total count = non-success from alert data (with ALL filters applied including payment state)
+      const totalCount = alertData.filter(item => 
+        item.paymentState !== 'success'
+      ).length;
+      
+      // Calculate non-success percentage from alert data
+      const originalDataSource = { sampleData: alertData };
+      const originalTotal = originalDataSource?.sampleData?.length || 0;
+      // Count all non-success transactions (including null/undefined states as non-success)
+      const originalNonSuccessCount = originalDataSource?.sampleData?.filter(item => 
+        item.paymentState !== 'success'
+      ).length || 0;
+      const originalSuccessCount = originalDataSource?.sampleData?.filter(item => 
+        item.paymentState === 'success'
+      ).length || 0;
+      const originalNullOrUndefinedCount = originalDataSource?.sampleData?.filter(item => 
+        !item.paymentState
+      ).length || 0;
+      const nonSuccessPercentage = originalTotal > 0 ? (originalNonSuccessCount / originalTotal) * 100 : 0;
+      
+      // Determine if we should show the graph based on configurable thresholds
+      let alertLevel = 'none';
+      let showGraph = false;
+      
+      if (originalTotal > 0) {
+        if (nonSuccessPercentage >= criticalThreshold) {
+          alertLevel = 'critical';
+          showGraph = true;
+        } else if (nonSuccessPercentage >= warningThreshold) {
+          alertLevel = 'warning';
+          showGraph = true;
+        }
+      }
+      
+      return {
+        items: alerts,
+        total: { count: totalCount, label: getDynamicLabel() },
+        showGraph: showGraph,
+        alertLevel: alertLevel,
+        percentage: nonSuccessPercentage,
+        nonSuccessCount: originalNonSuccessCount,
+        totalTransactions: originalTotal,
+        periodLabel: getDatePeriodLabel()
+      };
+    }
+    
+    // Fallback return when no data
+    return { 
+      items: [], 
+      total: { count: 0, label: getDynamicLabel() },
+      showGraph: false,
+      alertLevel: 'none',
+      percentage: 0,
+      nonSuccessCount: 0,
+      totalTransactions: 0,
+      periodLabel: getDatePeriodLabel()
+    };
+  }, [activeTab, originalData, metricsData, dateRanges, tabFilters, criticalThreshold, warningThreshold]); // Tab-specific filters via tabFilters[activeTab]
+
+  const handleTabChange = (tabId) => {
+    setActiveTab(tabId);
+    setShowTooltip(null);
   };
 
   // Get dynamic age groups based on selected date filter
@@ -678,56 +962,199 @@ function AgedMetricsTabs() {
     }
   };
 
-  const calculateAgeGroups = (data, filter) => {
-    const now = new Date();
-    const ageGroups = getDynamicAgeGroups(filter);
+  // Determine how many time units to show based on date filter and frequency
+  // Matches backend logic from PaymentService.java
+  const getTimeRangeInUnits = (dateFilter, frequency) => {
+    if (!dateFilter) dateFilter = 'last_7_days';
+    if (!frequency) frequency = 'daily';
     
-    // Initialize groups with transactions array
-    const groups = {};
-    ageGroups.forEach(group => {
-      groups[group.label] = { count: 0, amount: 0, transactions: [] };
-    });
+    switch (frequency.toLowerCase()) {
+      case 'hourly':
+        // For hourly, show hours based on date filter
+        switch (dateFilter) {
+          case 'last_15_min': return 1;
+          case 'last_60_min': return 1;
+          case 'last_4_hours': return 4;
+          case 'last_24_hours':
+          case 'today': return 24;
+          case 'yesterday': return 24;
+          case 'last_7_days':
+          case 'last_week': return 7 * 24;
+          case 'last_28_days': return 28 * 24;
+          case 'last_30_days':
+          case 'last_month':
+          case 'last_1_month': return 30 * 24;
+          case 'last_90_days': return 90 * 24;
+          default: return 24;
+        }
+        
+      case 'weekly':
+        // For weekly, show weeks based on date filter
+        switch (dateFilter) {
+          case 'last_7_days':
+          case 'last_week': return 1;
+          case 'last_28_days': return 4;
+          case 'last_30_days':
+          case 'last_month':
+          case 'last_1_month': return 4;
+          case 'last_90_days': return 12;
+          default: return 4;
+        }
+        
+      case 'monthly':
+        // For monthly, show months based on date filter
+        switch (dateFilter) {
+          case 'last_30_days':
+          case 'last_month':
+          case 'last_1_month': return 1;
+          case 'last_90_days': return 3;
+          default: return 3;
+        }
+        
+      case 'daily':
+      default:
+        // For daily, show days based on date filter
+        switch (dateFilter) {
+          case 'last_15_min':
+          case 'last_60_min':
+          case 'last_4_hours':
+          case 'last_24_hours':
+          case 'today':
+          case 'yesterday': return 1;
+          case 'last_7_days':
+          case 'last_week': return 7;
+          case 'last_28_days': return 28;
+          case 'last_30_days':
+          case 'last_month':
+          case 'last_1_month': return 30;
+          case 'last_90_days': return 90;
+          default: return 7;
+        }
+    }
+  };
 
+  const calculateAgeGroups = (data, filter, freq = 'daily') => {
+    // Always use dynamic grouping based on frequency (matching Overview chart behavior)
+    // This ensures time periods are calculated dynamically from transaction timestamps
+    // rather than using hardcoded age buckets
+    // Pass the date filter so we can generate the correct number of periods
+    return groupByFrequency(data, freq, filter);
+  };
+  
+  // Group transactions by frequency (hourly, daily, weekly, monthly)
+  // Uses the same logic as backend API for consistent labeling
+  // Generates ALL expected time periods based on dateFilter, not just periods with data
+  const groupByFrequency = (data, freq, dateFilter = 'last_7_days') => {
+    const now = new Date();
+    
+    // Step 1: Determine how many periods to generate based on date filter and frequency
+    const periodCount = getTimeRangeInUnits(dateFilter, freq);
+    
+    // Step 2: Pre-create all expected time period groups (even empty ones)
+    const groups = {};
+    for (let i = 0; i < periodCount; i++) {
+      let groupKey;
+      let sortKey = i;
+      
+      if (freq === 'hourly') {
+        groupKey = `${i}h ago`;
+      } else if (freq === 'daily') {
+        if (i === 0) {
+          groupKey = 'Today';
+        } else if (i === 1) {
+          groupKey = 'Yesterday';
+        } else {
+          groupKey = `${i} days ago`;
+        }
+      } else if (freq === 'weekly') {
+        groupKey = `Week ${i + 1}`;
+      } else if (freq === 'monthly') {
+        groupKey = `Month ${i + 1}`;
+      } else {
+        // Default to daily
+        if (i === 0) {
+          groupKey = 'Today';
+        } else if (i === 1) {
+          groupKey = 'Yesterday';
+        } else {
+          groupKey = `${i} days ago`;
+        }
+      }
+      
+      groups[groupKey] = { count: 0, amount: 0, transactions: [], sortKey };
+    }
+    
+    // Step 3: Distribute transactions into the pre-created groups
     data.forEach(item => {
       const itemDate = new Date(item.date);
       const diffMs = now - itemDate;
+      let groupKey;
+      let sortKey;
       
-      // Find which group this item belongs to
-      for (const group of ageGroups) {
-        let itemValue;
-        
-        if (group.unit === 'minutes') {
-          itemValue = diffMs / (1000 * 60);
-        } else if (group.unit === 'hours') {
-          itemValue = diffMs / (1000 * 60 * 60);
+      if (freq === 'hourly') {
+        // Group by hours ago (matching backend: "0h ago", "1h ago", etc.)
+        const hoursAgo = Math.floor(diffMs / (1000 * 60 * 60));
+        groupKey = `${hoursAgo}h ago`;
+        sortKey = hoursAgo;
+      } else if (freq === 'daily') {
+        // Group by days ago (matching backend: "Today", "Yesterday", "2 days ago", etc.)
+        const daysAgo = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        if (daysAgo === 0) {
+          groupKey = 'Today';
+        } else if (daysAgo === 1) {
+          groupKey = 'Yesterday';
         } else {
-          itemValue = diffMs / (1000 * 60 * 60 * 24);
+          groupKey = `${daysAgo} days ago`;
         }
-        
-        if (itemValue >= group.min && itemValue < group.max) {
-          groups[group.label].count++;
-          groups[group.label].amount += item.amount;
-          groups[group.label].transactions.push(item);
-          break;
+        sortKey = daysAgo;
+      } else if (freq === 'weekly') {
+        // Group by weeks ago (matching backend: "Week 1", "Week 2", etc.)
+        const weeksAgo = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 7));
+        groupKey = `Week ${weeksAgo + 1}`;
+        sortKey = weeksAgo;
+      } else if (freq === 'monthly') {
+        // Group by months ago (matching backend: "Month 1", "Month 2", etc.)
+        const monthsAgo = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 30));
+        groupKey = `Month ${monthsAgo + 1}`;
+        sortKey = monthsAgo;
+      } else {
+        // Default to daily
+        const daysAgo = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        if (daysAgo === 0) {
+          groupKey = 'Today';
+        } else if (daysAgo === 1) {
+          groupKey = 'Yesterday';
+        } else {
+          groupKey = `${daysAgo} days ago`;
         }
+        sortKey = daysAgo;
+      }
+      
+      // Only add to group if it was pre-created (within the expected time range)
+      if (groups[groupKey]) {
+        groups[groupKey].count++;
+        groups[groupKey].amount += item.amount;
+        groups[groupKey].transactions.push(item);
       }
     });
-
-    return Object.entries(groups).map(([label, data]) => ({
+    
+    // Sort by date and format
+    const result = Object.entries(groups)
+      .sort((a, b) => a[1].sortKey - b[1].sortKey)
+      .map(([label, data]) => ({
       label,
       count: data.count,
       amount: `$${data.amount.toFixed(2)}`,
-      highlight: false, // No highlighting since we removed the infinity buckets
+        highlight: false,
       transactions: data.transactions
     }));
+    
+    return result;
   };
 
   const handleAgeGroupClick = (ageGroupItem) => {
-    // Only allow clicking for Approvals tab
-    if (activeTab === 'approvals') {
-      setSelectedAgeGroup(ageGroupItem.label);
-      setAgeGroupTransactions(ageGroupItem.transactions || []);
-    }
+    setSelectedAgeGroup(ageGroupItem.label);
+    setAgeGroupTransactions(ageGroupItem.transactions || []);
   };
 
   const handleCloseTransactionDetails = () => {
@@ -736,7 +1163,7 @@ function AgedMetricsTabs() {
   };
 
   // Apply filters to a single tab
-  const applyFiltersToTab = (tabId) => {
+  const applyFiltersToTab = React.useCallback((tabId) => {
     const { from, to } = dateRanges[tabId];
     
     // Skip filtering for tabs without sample data
@@ -744,21 +1171,33 @@ function AgedMetricsTabs() {
       return null;
     }
 
+    // Get tab-specific filters
+    const tabFiltersForThisTab = tabFilters[tabId];
+    const {
+      orderType: tabOrderType,
+      paymentMethod: tabPaymentMethod,
+      paymentState: tabPaymentState,
+      dateFilter: tabDateFilter,
+      customDateRange: tabCustomDateRange,
+      frequency: tabFrequency
+    } = tabFiltersForThisTab;
+
     let filtered = [...originalData[tabId].sampleData];
     
-    // Apply all filters in sequence
+    // Apply all filters in sequence using tab-specific filter values
     // First apply the date period filter (from dropdown)
-    if (dateFilter) {
-      filtered = filterDataByDateFilter(filtered, dateFilter, customDateRange);
+    if (tabDateFilter) {
+      filtered = filterDataByDateFilter(filtered, tabDateFilter, tabCustomDateRange);
     }
     
     // Then apply the old date range filters (if any)
     filtered = filterDataByDate(filtered, from, to);
-    filtered = filterDataByOrderType(filtered, orderType);
-    filtered = filterDataByPaymentMethod(filtered, paymentMethod);
-    filtered = filterDataByPaymentState(filtered, paymentState);
+    filtered = filterDataByOrderType(filtered, tabOrderType);
+    filtered = filterDataByPaymentMethod(filtered, tabPaymentMethod);
+    filtered = filterDataByPaymentState(filtered, tabPaymentState);
     
-    const ageGroups = calculateAgeGroups(filtered, dateFilter);
+    // Calculate age groups with frequency - pass the frequency parameter
+    const ageGroups = calculateAgeGroups(filtered, tabDateFilter, tabFrequency);
     const totalAmount = filtered.reduce((sum, item) => sum + item.amount, 0);
     
     return {
@@ -770,15 +1209,10 @@ function AgedMetricsTabs() {
         amount: `$${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
       }
     };
-  };
+  }, [dateRanges, originalData, tabFilters]);
 
-  // Apply filters to all tabs
-  const applyFiltersToAllTabs = () => {
-    console.log('=== APPLYING FILTERS TO ALL TABS ===');
-    console.log('Order Type:', orderType);
-    console.log('Payment Method:', paymentMethod);
-    console.log('Payment State:', paymentState);
-    
+  // Apply filters to all tabs (each tab uses its own filters)
+  const applyFiltersToAllTabs = React.useCallback(() => {
     // Always calculate data from sampleData to ensure consistency
     const newFilteredData = {};
     const tabIds = ['approvals', 'deposit', 'refunds', 'reverseApproval'];
@@ -795,36 +1229,57 @@ function AgedMetricsTabs() {
     // Copy alerts data
     newFilteredData.alerts = originalData.alerts;
 
-    console.log('=== FILTER APPLICATION COMPLETE ===');
     setFilteredData(newFilteredData);
-  };
+  }, [applyFiltersToTab, originalData, tabFilters]);
 
 
   const clearAllFilters = () => {
-    // Reset all filter states
-    setOrderType('all');
-    setPaymentMethod('all');
-    setPaymentState('all'); // Reset to default all state
-    setFrequency('daily'); // Reset frequency to daily
-    setDateRanges({
-      approvals: defaultRange,
-      deposit: defaultRange,
-      refunds: defaultRange,
-      reverseApproval: defaultRange,
-      alerts: defaultRange
-    });
+    // Reset only the current tab's filter states
+    setTabFilters(prev => ({
+      ...prev,
+      [activeTab]: {
+        orderType: 'all',
+        paymentMethod: 'all',
+        paymentState: 'all',
+        dateFilter: 'last_7_days',
+        customDateRange: { startDate: '', endDate: '' },
+        frequency: 'daily'
+      }
+    }));
     
-    // Re-apply default filters (7 days + all state)
-    setTimeout(() => {
-      applyFiltersToAllTabs();
-    }, 100);
+    // Reset the current tab's date range
+    setDateRanges(prev => ({
+      ...prev,
+      [activeTab]: defaultRange
+    }));
+    
+    // NOTE: No need to call applyFiltersToAllTabs() - the filter state changes
+    // will automatically trigger the useEffect that fetches from API
     
     // Show success toast
-    setToastMessage('✓ Filters reset to defaults (7 days, All payment states, Daily frequency)');
+    setToastMessage(`✓ Filters reset to defaults for ${activeTab} tab (7 days, All payment states, Daily frequency)`);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 3000);
   };
 
+
+  // Fetch all payments from API on mount
+  React.useEffect(() => {
+    const loadAllPayments = async () => {
+      try {
+        setLoading(true);
+        const payments = await fetchPayments();
+        setAllPayments(payments);
+        setLoading(false);
+      } catch (error) {
+        console.error('Error fetching payments:', error);
+        setLoading(false);
+        alert('Failed to load payment data from database. Please try again.');
+      }
+    };
+    
+    loadAllPayments();
+  }, []);
 
   // Fetch filter options from API on mount
   React.useEffect(() => {
@@ -843,31 +1298,10 @@ function AgedMetricsTabs() {
         setFiltersLoading(false);
       } catch (error) {
         console.error('Error fetching filter options:', error);
-        // Fallback to hardcoded values if API fails
-        setOrderTypeOptions([
-          { value: 'regular', label: 'Regular' },
-          { value: 'subscription', label: 'Subscription' },
-          { value: 'onetime', label: 'Onetime' },
-          { value: 'cvc_no_show_penality', label: 'CVC No Show Penality' },
-          { value: 'loyalty', label: 'Loyalty' },
-          { value: 'cwav_telemedicine', label: 'CWAV Telemedicine' }
-        ]);
-        setPaymentMethodOptions([
-          { value: 'creditcard', label: 'Credit Card' },
-          { value: 'paypal', label: 'PayPal' },
-          { value: 'applepay', label: 'Apple Pay' },
-          { value: 'giftcard', label: 'Gift Card' },
-          { value: 'accountbalance', label: 'Account Balance' }
-        ]);
-        setPaymentStateOptions([
-          { value: 'success', label: 'Success' },
-          { value: 'processing', label: 'Processing' },
-          { value: 'failed', label: 'Failed' },
-          { value: 'canceled', label: 'Canceled' },
-          { value: 'expired', label: 'Expired' },
-          { value: 'declined', label: 'Declined' },
-          { value: 'pending', label: 'Pending' }
-        ]);
+        // Set empty arrays if API fails (no hardcoded fallback)
+        setOrderTypeOptions([]);
+        setPaymentMethodOptions([]);
+        setPaymentStateOptions([]);
         setFiltersLoading(false);
       }
     };
@@ -875,38 +1309,39 @@ function AgedMetricsTabs() {
     loadFilterOptions();
   }, []);
 
-  // Fetch aged metrics data from API
+  // Fetch alert settings from API on mount
   React.useEffect(() => {
-    const loadMetricsData = async () => {
+    const loadAlertSettings = async () => {
       try {
-        setLoading(true);
-        const data = await fetchAgedMetrics(orderType, paymentMethod, paymentState, dateFilter, frequency);
-        setApiData(data);
-        setLoading(false);
+        const settings = await fetchAlertSettings();
+        setCriticalThreshold(settings.criticalThreshold);
+        setWarningThreshold(settings.warningThreshold);
+        setQueryText(settings.queryText || '');
+        setTempCriticalThreshold(settings.criticalThreshold);
+        setTempWarningThreshold(settings.warningThreshold);
+        setTempQueryText(settings.queryText || '');
       } catch (error) {
-        console.error('Error fetching aged metrics:', error);
-        setLoading(false);
-        // Show error to user
-        alert('Failed to fetch data from database. Please try again.');
+        console.error('Error loading alert settings:', error);
+        // Use default values if fetching fails
       }
     };
     
-    loadMetricsData();
-  }, [orderType, paymentMethod, paymentState, dateFilter, frequency]);
+    loadAlertSettings();
+  }, []);
 
-  // Effect to re-apply filters when orderType, paymentMethod, paymentState, dateFilter, or frequency changes
+  // Apply client-side filters whenever tab filters or sample data changes
   React.useEffect(() => {
-    console.log('useEffect triggered - filter changed');
-    console.log('Re-applying filters to all tabs due to filter change');
-    applyFiltersToAllTabs();
-  }, [orderType, paymentMethod, paymentState, dateFilter, customDateRange, frequency]);
+    // Only apply filters if we have sample data
+    if (sampleDataCache.approvals.length > 0 || 
+        sampleDataCache.deposit.length > 0 || 
+        sampleDataCache.refunds.length > 0 || 
+        sampleDataCache.reverseApproval.length > 0) {
+      applyFiltersToAllTabs();
+    }
+  }, [tabFilters, sampleDataCache, applyFiltersToAllTabs, activeTab]);
 
-  // Effect to apply initial filters on component mount
-  React.useEffect(() => {
-    console.log('Applying initial filters - last 7 days, all payment states');
-    // Apply filters to all tabs on initial load
-    applyFiltersToAllTabs();
-  }, []); // Empty dependency array - runs only once on mount
+  // NOTE: Using client-side filtering with tab-specific filters
+  // Each tab maintains its own independent filter state and applies filters separately
 
   return (
     <div className={`aged-metrics-container ${isCollapsed ? 'collapsed' : ''}`}>
@@ -924,8 +1359,10 @@ function AgedMetricsTabs() {
               <div className="tab-count-wrapper">
                 <span className="tab-count">{tab.count}</span>
                 <div className="tab-info-icon-wrapper">
-                  <button 
+                  <span 
                     className="tab-info-icon-button"
+                    role="button"
+                    tabIndex={0}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (showTooltip === tab.id) {
@@ -939,10 +1376,26 @@ function AgedMetricsTabs() {
                         setShowTooltip(tab.id);
                       }
                     }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (showTooltip === tab.id) {
+                          setShowTooltip(null);
+                        } else {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setTooltipPosition({
+                            top: rect.top + window.scrollY - 8,
+                            left: rect.left + window.scrollX + (rect.width / 2)
+                          });
+                          setShowTooltip(tab.id);
+                        }
+                      }
+                    }}
                     onMouseLeave={() => setTimeout(() => setShowTooltip(null), 200)}
                   >
                     <Info size={14} />
-                  </button>
+                  </span>
                   {showTooltip === tab.id && ReactDOM.createPortal(
                     <div 
                       className="tab-info-tooltip-portal above"
@@ -981,7 +1434,7 @@ function AgedMetricsTabs() {
                 id="orderType"
                 className="filter-dropdown"
                 value={orderType}
-                onChange={(e) => setOrderType(e.target.value)}
+                onChange={(e) => updateTabFilter('orderType', e.target.value)}
               >
                 <option value="all">All</option>
                 {!filtersLoading && orderTypeOptions.map(option => (
@@ -996,7 +1449,7 @@ function AgedMetricsTabs() {
                 id="paymentMethod"
                 className="filter-dropdown"
                 value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
+                onChange={(e) => updateTabFilter('paymentMethod', e.target.value)}
                 disabled={filtersLoading}
               >
                 <option value="all">All</option>
@@ -1012,7 +1465,7 @@ function AgedMetricsTabs() {
                 id="paymentState"
                 className="filter-dropdown"
                 value={paymentState}
-                onChange={(e) => setPaymentState(e.target.value)}
+                onChange={(e) => updateTabFilter('paymentState', e.target.value)}
                 disabled={filtersLoading}
               >
                 <option value="all">All</option>
@@ -1040,18 +1493,19 @@ function AgedMetricsTabs() {
                 <h3>{currentData.title}</h3>
                 <DateFilter 
                   dateFilter={dateFilter}
-                  setDateFilter={setDateFilter}
+                  setDateFilter={(value) => updateTabFilter('dateFilter', value)}
                   customDateRange={customDateRange}
-                  setCustomDateRange={setCustomDateRange}
+                  setCustomDateRange={(value) => updateTabFilter('customDateRange', value)}
+                  idPrefix="aged-metrics"
                 />
                 <div className="frequency-filter" style={{ display: 'flex', alignItems: 'center', marginLeft: '12px' }}>
-                  <label htmlFor="frequency-select" style={{ fontSize: '14px', fontWeight: '500', marginRight: '8px' }}>
+                  <label htmlFor="aged-metrics-frequency-select" style={{ fontSize: '14px', fontWeight: '500', marginRight: '8px' }}>
                     Frequency:
                   </label>
                   <select
-                    id="frequency-select"
+                    id="aged-metrics-frequency-select"
                     value={frequency}
-                    onChange={(e) => setFrequency(e.target.value)}
+                    onChange={(e) => updateTabFilter('frequency', e.target.value)}
                     style={{
                       padding: '6px 12px',
                       borderRadius: '6px',
@@ -1109,14 +1563,18 @@ function AgedMetricsTabs() {
                 <div className="chart-title-wrapper">
                   <div className="chart-icon count-icon">📈</div>
                   <div>
-                    <div className="chart-title">Transaction Frequency</div>
+                    <div className="chart-title">
+                      {activeTab === 'approvals' ? 'Approval Requests Frequency' : 
+                       activeTab === 'deposit' ? 'Deposit Requests Frequency' : 
+                       activeTab === 'refunds' ? 'Refund Requests Frequency' : 
+                       activeTab === 'reverseApproval' ? 'Reverse Approval Requests Frequency' : 
+                       'Transaction Frequency'}
+                    </div>
                     <div className="chart-subtitle">
                       n = {currentData.total.count} transactions
-                      {activeTab === 'approvals' && (
-                        <span style={{ marginLeft: '10px', fontSize: '11px', color: '#667eea', fontStyle: 'italic' }}>
-                          (Click bar to view details)
-                        </span>
-                      )}
+                      <span style={{ marginLeft: '10px', fontSize: '11px', color: '#667eea', fontStyle: 'italic' }}>
+                        (Click bar to view details)
+                      </span>
                   </div>
                 </div>
               </div>
@@ -1160,17 +1618,17 @@ function AgedMetricsTabs() {
                       fill="#667eea" 
                       name="Transaction Count"
                       onClick={(data) => {
-                        if (activeTab === 'approvals' && data && data.originalItem) {
+                        if (data && data.originalItem) {
                           handleAgeGroupClick(data.originalItem);
                         }
                       }}
-                      style={{ cursor: activeTab === 'approvals' ? 'pointer' : 'default' }}
+                      style={{ cursor: 'pointer' }}
                     >
                       {currentData.items.map((entry, index) => (
                         <Cell 
                           key={`cell-${index}`} 
                           fill={entry.highlight ? '#dc2626' : '#667eea'}
-                          style={{ cursor: activeTab === 'approvals' ? 'pointer' : 'default' }}
+                          style={{ cursor: 'pointer' }}
                         />
                       ))}
                     </Bar>
@@ -1188,11 +1646,9 @@ function AgedMetricsTabs() {
                     <div className="chart-title">Amount Distribution</div>
                     <div className="chart-subtitle">
                       Σ = {currentData.total.amount} total value
-                      {activeTab === 'approvals' && (
-                        <span style={{ marginLeft: '10px', fontSize: '11px', color: '#48bb78', fontStyle: 'italic' }}>
-                          (Click bar to view details)
-                        </span>
-                      )}
+                      <span style={{ marginLeft: '10px', fontSize: '11px', color: '#48bb78', fontStyle: 'italic' }}>
+                        (Click bar to view details)
+                      </span>
                   </div>
                 </div>
               </div>
@@ -1238,17 +1694,17 @@ function AgedMetricsTabs() {
                       fill="#48bb78" 
                       name="Amount"
                       onClick={(data) => {
-                        if (activeTab === 'approvals' && data && data.originalItem) {
+                        if (data && data.originalItem) {
                           handleAgeGroupClick(data.originalItem);
                         }
                       }}
-                      style={{ cursor: activeTab === 'approvals' ? 'pointer' : 'default' }}
+                      style={{ cursor: 'pointer' }}
                     >
                       {currentData.items.map((entry, index) => (
                         <Cell 
                           key={`cell-${index}`} 
                           fill={entry.highlight ? '#dc2626' : '#48bb78'}
-                          style={{ cursor: activeTab === 'approvals' ? 'pointer' : 'default' }}
+                          style={{ cursor: 'pointer' }}
                         />
                       ))}
                     </Bar>
@@ -1259,77 +1715,150 @@ function AgedMetricsTabs() {
           </div>
         </div>
         )}
-
         {/* Alerts Section - shown in all tabs, dynamically generated from payment states */}
-        {!loading && (
-        <div className="alerts-section">
-          <div className="alerts-header">
-            <Bell size={20} />
-            <h4>Alerts for Approval</h4>
-          </div>
-          {currentAlerts.showGraph && currentAlerts.items.length > 0 ? (
-            <>
-              {/* Chart Title */}
-              <div className="chart-title-section">
-                <h5 style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
-                  <span style={{ fontSize: '20px' }}>
-                    {currentAlerts.alertLevel === 'critical' ? '🔴' : '⚠️'}
-                      </span>
-                  {(() => {
-                    const titles = {
-                      approval: 'Alerts for Approval',
-                      deposit: 'Alerts for Deposit',
+        {!loading && (() => {
+          // Generate dynamic X-axis label based on date filter and frequency
+          const getXAxisLabel = () => {
+            const datePeriodLabels = {
+              'last_15_min': 'Last 15 Minutes',
+              'last_1_hour': 'Last 1 Hour',
+              'last_24_hours': 'Last 24 Hours',
+              'last_7_days': 'Last 7 Days',
+              'last_28_days': 'Last 28 Days',
+              'last_3_months': 'Last 3 Months',
+              'last_1_year': 'Last 1 Year'
+            };
+            
+            const frequencyLabels = {
+              'hourly': 'Hourly',
+              'daily': 'Daily',
+              'weekly': 'Weekly',
+              'monthly': 'Monthly'
+            };
+            
+            const periodText = datePeriodLabels[dateFilter] || 'Selected Period';
+            const freqText = frequencyLabels[frequency] || 'Daily';
+            
+            return `Time Period - ${freqText} (${periodText})`;
+          };
+          
+          // Generate dynamic heading based on active tab
+          const getAlertHeading = () => {
+            const headings = {
+              approvals: 'Alerts for Approvals',
+              deposits: 'Alerts for Deposits',
                       refunds: 'Alerts for Refunds',
                       reverseApproval: 'Alerts for Reverse Approval'
                     };
-                    return titles[activeTab] || 'Alerts for Approval';
-                  })()}
-                  <span style={{ 
-                    fontSize: '12px', 
-                    fontWeight: 'normal', 
-                    color: currentAlerts.alertLevel === 'critical' ? '#dc2626' : '#f59e0b',
-                    background: currentAlerts.alertLevel === 'critical' ? '#fef2f2' : '#fffbeb',
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    marginLeft: '8px'
-                  }}>
-                    {currentAlerts.alertLevel === 'critical' ? 'CRITICAL' : 'WARNING'}: {Math.round(currentAlerts.percentage)}% Non-Success
+            return headings[activeTab] || 'Alerts';
+          };
+          
+          // Generate dynamic Y-axis label based on active tab
+          const getYAxisLabel = () => {
+            const labels = {
+              approvals: 'Approval Requests',
+              deposits: 'Deposit Requests',
+              refunds: 'Refund Requests',
+              reverseApproval: 'Reverse Approval Requests'
+            };
+            return labels[activeTab] || 'Transaction Count';
+          };
+          
+          return (
+            <div className="alerts-section">
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '20px',
+                borderBottom: '2px solid #e2e8f0',
+                paddingBottom: '10px'
+              }}>
+                <h2 style={{
+                  fontSize: '20px',
+                  fontWeight: '600',
+                  color: '#1e293b',
+                  margin: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px'
+                }}>
+                  {getAlertHeading()}
+                  {currentAlerts.showGraph && currentAlerts.items.length > 0 && (
+                    <span 
+                      style={{ 
+                        fontSize: '28px',
+                        animation: 'pulse 2s ease-in-out infinite',
+                        display: 'inline-block'
+                      }}
+                      title={currentAlerts.alertLevel === 'critical' ? 'Critical Alert' : 'Warning Alert'}
+                    >
+                      {currentAlerts.alertLevel === 'critical' ? '🚨' : '⚠️'}
                   </span>
-                </h5>
+                  )}
+                </h2>
+                <button
+                  onClick={() => {
+                    setTempCriticalThreshold(criticalThreshold);
+                    setTempWarningThreshold(warningThreshold);
+                    setTempQueryText(queryText);
+                    setShowAlertSettings(true);
+                  }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '6px',
+                    transition: 'background-color 0.2s',
+                    color: '#64748b'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  title="Alert Settings"
+                >
+                  <Settings size={20} />
+                </button>
                     </div>
 
+
+              {currentAlerts.showGraph && currentAlerts.items.length > 0 ? (
+                <>
               <div className="alerts-chart-container">
                 <ResponsiveContainer width="100%" height={350}>
                   <LineChart
                     data={currentAlerts.items.map(item => ({
                       name: item.fullLabel || item.label,
-                      count: item.count
+                          count: item.count,
+                          stateBreakdown: item.stateBreakdown
                     }))}
                     margin={{ top: 20, right: 30, left: 20, bottom: 40 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                     <XAxis 
                       dataKey="name" 
-                      label={{ value: 'Time Period (Last 7 Days)', position: 'insideBottom', offset: -10 }}
+                          label={{ value: getXAxisLabel(), position: 'insideBottom', offset: -10 }}
                       tick={{ fontSize: 12 }}
                       angle={-15}
                       textAnchor="end"
                     />
                     <YAxis 
-                      label={{ value: 'Transaction Count', angle: -90, position: 'insideLeft' }}
+                      label={{ value: getYAxisLabel(), angle: -90, position: 'insideLeft' }}
                       tick={{ fontSize: 12 }}
                     />
                     <Tooltip 
-                      contentStyle={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px' }}
-                      labelStyle={{ fontWeight: 'bold', marginBottom: '5px' }}
+                      content={<CustomAlertTooltip />}
                     />
                     <Line 
                       type="monotone" 
                       dataKey="count" 
-                      stroke={currentAlerts.alertLevel === 'critical' ? '#dc2626' : '#f59e0b'}
+                      stroke={currentAlerts.alertLevel === 'critical' ? '#dc2626' : '#d97706'}
                       strokeWidth={3}
                       dot={{ 
-                        fill: currentAlerts.alertLevel === 'critical' ? '#dc2626' : '#f59e0b', 
+                        fill: currentAlerts.alertLevel === 'critical' ? '#dc2626' : '#d97706', 
                         strokeWidth: 2, 
                         r: 6 
                       }}
@@ -1354,16 +1883,18 @@ function AgedMetricsTabs() {
                     ({currentAlerts.nonSuccessCount} of {currentAlerts.totalTransactions} transactions)
                   </p>
                   <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
-                    ⚠️ Warning graph appears at 50% | 🔴 Critical alert at 70%
+                    ⚠️ Warning alert appears when {warningThreshold}%+ transactions are non-success (Critical at {criticalThreshold}%+)
                   </p>
             </div>
               ) : (
-                <p>✓ No non-success transactions in the last 7 days</p>
+                <p>✓ No non-success transactions - All transactions successful!</p>
               )}
             </div>
           )}
         </div>
-        )}
+          );
+        })()}
+
           </div>
         </>
       )}
@@ -1386,7 +1917,257 @@ function AgedMetricsTabs() {
           defaultPaymentMethod={paymentMethod !== 'all' ? paymentMethod : ''}
           defaultPaymentState={paymentState !== 'all' ? paymentState : ''}
           defaultDateFilter={dateFilter}
+          activeTab={activeTab}
         />
+      )}
+
+      {/* Alert Settings Modal */}
+      {showAlertSettings && ReactDOM.createPortal(
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000
+          }}
+          onClick={() => setShowAlertSettings(false)}
+        >
+          <div 
+            style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              padding: '30px',
+              maxWidth: '600px',
+              width: '90%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              maxHeight: '90vh',
+              overflowY: 'auto'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{
+              fontSize: '24px',
+              fontWeight: '600',
+              marginBottom: '24px',
+              color: '#1e293b',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
+            }}>
+              <Settings size={24} />
+              Alert Threshold Settings
+            </h2>
+
+            <div style={{ marginBottom: '24px' }}>
+              <div style={{ marginBottom: '24px' }}>
+                <label htmlFor="modal-warning-threshold" style={{ 
+                  fontSize: '14px', 
+                  fontWeight: '600',
+                  color: '#475569',
+                  display: 'block',
+                  marginBottom: '8px'
+                }}>
+                  ⚠️ Warning Threshold (%)
+                </label>
+                <input
+                  id="modal-warning-threshold"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={tempWarningThreshold}
+                  onChange={(e) => {
+                    const value = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                    setTempWarningThreshold(value);
+                    if (value >= tempCriticalThreshold) {
+                      setTempCriticalThreshold(Math.min(100, value + 1));
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    fontSize: '16px',
+                    border: '2px solid #cbd5e1',
+                    borderRadius: '8px',
+                    backgroundColor: 'white',
+                    marginBottom: '8px'
+                  }}
+                />
+                <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
+                  Show warning alert when ≥ {tempWarningThreshold}% of transactions fail
+                </p>
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <label htmlFor="modal-critical-threshold" style={{ 
+                  fontSize: '14px', 
+                  fontWeight: '600',
+                  color: '#475569',
+                  display: 'block',
+                  marginBottom: '8px'
+                }}>
+                  🔴 Critical Threshold (%)
+                </label>
+                <input
+                  id="modal-critical-threshold"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={tempCriticalThreshold}
+                  onChange={(e) => {
+                    const value = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                    setTempCriticalThreshold(value);
+                    if (value <= tempWarningThreshold) {
+                      setTempWarningThreshold(Math.max(0, value - 1));
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    fontSize: '16px',
+                    border: '2px solid #cbd5e1',
+                    borderRadius: '8px',
+                    backgroundColor: 'white',
+                    marginBottom: '8px'
+                  }}
+                />
+                <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
+                  Show critical alert when ≥ {tempCriticalThreshold}% of transactions fail
+                </p>
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <label htmlFor="modal-query-text" style={{ 
+                  fontSize: '14px', 
+                  fontWeight: '600',
+                  color: '#475569',
+                  display: 'block',
+                  marginBottom: '8px'
+                }}>
+                  📝 Query Text
+                </label>
+                <textarea
+                  id="modal-query-text"
+                  value={tempQueryText}
+                  onChange={(e) => setTempQueryText(e.target.value)}
+                  placeholder="Enter a custom query or note for this alert configuration..."
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    fontSize: '14px',
+                    border: '2px solid #cbd5e1',
+                    borderRadius: '8px',
+                    backgroundColor: 'white',
+                    marginBottom: '8px',
+                    fontFamily: 'inherit',
+                    resize: 'vertical'
+                  }}
+                />
+                <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
+                  Optional: Add a custom query or note to describe this alert configuration
+                </p>
+              </div>
+
+              <div style={{
+                padding: '12px 16px',
+                backgroundColor: '#f1f5f9',
+                borderRadius: '8px',
+                borderLeft: '4px solid #3b82f6'
+              }}>
+                <p style={{ 
+                  fontSize: '13px', 
+                  color: '#475569',
+                  margin: 0,
+                  lineHeight: '1.6'
+                }}>
+                  💡 <strong>Tip:</strong> Critical threshold should be higher than warning threshold. 
+                  Adjust these values to customize when alerts appear in your dashboard.
+                </p>
+              </div>
+            </div>
+
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              marginTop: '24px'
+            }}>
+              <button
+                onClick={() => setShowAlertSettings(false)}
+                style={{
+                  padding: '10px 24px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  color: '#64748b',
+                  backgroundColor: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#e2e8f0';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#f1f5f9';
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    // Save to database
+                    await saveAlertSettings(tempWarningThreshold, tempCriticalThreshold, tempQueryText);
+                    
+                    // Update local state
+                    setCriticalThreshold(tempCriticalThreshold);
+                    setWarningThreshold(tempWarningThreshold);
+                    setQueryText(tempQueryText);
+                    setShowAlertSettings(false);
+                    
+                    // Show success message
+                    setToastMessage('✓ Alert threshold settings saved successfully');
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 3000);
+                  } catch (error) {
+                    console.error('Error saving alert settings:', error);
+                    // Show error message
+                    setToastMessage('✗ Failed to save alert settings: ' + (error.response?.data?.error || error.message));
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 5000);
+                  }
+                }}
+                style={{
+                  padding: '10px 24px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  color: 'white',
+                  backgroundColor: '#3b82f6',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#2563eb';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#3b82f6';
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
